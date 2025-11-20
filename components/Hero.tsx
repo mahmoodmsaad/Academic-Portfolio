@@ -70,8 +70,8 @@ const Hero: React.FC = () => {
             <div className="absolute top-0 right-0 -mr-4 -mt-4 w-full h-full rounded-full bg-academic-200 opacity-50 blur-3xl animate-pulse"></div>
             <div className="relative w-full h-full rounded-full overflow-hidden border-4 border-white shadow-2xl">
               <img 
-                src="https://picsum.photos/400/400" 
-                alt="M Saad Mahmood" 
+                src="/images/profile.jpg" 
+                alt="M Saad Mahmood - PhD Researcher in Computational Chemistry" 
                 className="w-full h-full object-cover"
               />
             </div>
