@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, ExternalLink, Code, BookOpen } from 'lucide-react';
 import { client } from '../sanity/client';
+import { PUBLICATIONS } from '../constants';
 
 interface Publication {
-  _id: string;
+  _id?: string;
+  id?: string;
   title: string;
   authors: string;
   journal: string;
@@ -22,7 +24,9 @@ const Research: React.FC = () => {
       try {
         const query = `*[_type == "publication"] | order(order asc, year desc)`;
         const pubs = await client.fetch(query);
-        setPublications(pubs);
+        if (pubs && pubs.length > 0) {
+          setPublications(pubs);
+        }
       } catch (error) {
         console.error('Error fetching publications:', error);
       } finally {
@@ -32,6 +36,9 @@ const Research: React.FC = () => {
 
     fetchPublications();
   }, []);
+
+  // Use Sanity data if available, otherwise fallback to constants
+  const displayPublications = publications.length > 0 ? publications : PUBLICATIONS;
 
   if (loading) {
     return (
@@ -66,8 +73,8 @@ const Research: React.FC = () => {
                 <h4 className="text-2xl font-bold text-slate-800">Selected Publications</h4>
             </div>
             <div className="space-y-6">
-              {publications.map((pub) => (
-                <div key={pub._id} className="group p-6 bg-white border border-slate-100 rounded-xl shadow-sm hover:shadow-md transition-shadow hover:border-academic-200">
+              {displayPublications.map((pub) => (
+                <div key={pub._id || pub.id} className="group p-6 bg-white border border-slate-100 rounded-xl shadow-sm hover:shadow-md transition-shadow hover:border-academic-200">
                   <div className="flex justify-between items-start gap-4">
                     <div>
                       <span className="inline-block px-2 py-1 text-xs font-bold text-academic-700 bg-academic-50 rounded mb-2">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Linkedin, Github, Mail } from 'lucide-react';
 import { client, urlFor } from '../sanity/client';
+import { PERSONAL_DETAILS, SOCIAL_LINKS } from '../constants';
 
 interface PersonalInfo {
   name: string;
@@ -32,8 +33,9 @@ const Hero: React.FC = () => {
           client.fetch(`*[_type == "socialLink"] | order(_createdAt asc)`)
         ]);
         
-        setPersonalInfo(info);
-        setSocialLinks(links);
+        // Use Sanity data if available, otherwise use constants
+        if (info) setPersonalInfo(info);
+        if (links && links.length > 0) setSocialLinks(links);
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -43,6 +45,10 @@ const Hero: React.FC = () => {
 
     fetchData();
   }, []);
+
+  // Use Sanity data if available, otherwise fallback to constants
+  const displayInfo = personalInfo || PERSONAL_DETAILS;
+  const displayLinks = socialLinks.length > 0 ? socialLinks : SOCIAL_LINKS;
 
   const getIcon = (iconName: string) => {
     switch (iconName) {
@@ -61,7 +67,7 @@ const Hero: React.FC = () => {
     }
   };
 
-  if (loading || !personalInfo) {
+  if (loading) {
     return (
       <section id="home" className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-academic-50 pt-16">
         <div className="text-center">
@@ -81,13 +87,13 @@ const Hero: React.FC = () => {
             Available for Collaboration
           </div>
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold font-serif text-slate-900 mb-4 leading-tight">
-            {personalInfo.name}
+            {displayInfo.name}
           </h1>
           <h2 className="text-xl md:text-2xl text-academic-600 font-medium mb-6">
-            {personalInfo.title}
+            {displayInfo.title}
           </h2>
           <p className="text-lg text-slate-600 mb-8 max-w-lg mx-auto md:mx-0 leading-relaxed">
-            {personalInfo.tagline}
+            {displayInfo.tagline}
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
@@ -107,7 +113,7 @@ const Hero: React.FC = () => {
           </div>
 
           <div className="mt-10 flex gap-6 justify-center md:justify-start">
-            {socialLinks.map((link) => (
+            {displayLinks.map((link) => (
               <a 
                 key={link.platform}
                 href={link.url}
@@ -128,11 +134,19 @@ const Hero: React.FC = () => {
              {/* Decorative blobs */}
             <div className="absolute top-0 right-0 -mr-4 -mt-4 w-full h-full rounded-full bg-academic-200 opacity-50 blur-3xl animate-pulse"></div>
             <div className="relative w-full h-full rounded-full overflow-hidden border-4 border-white shadow-2xl">
-              <img 
-                src={urlFor(personalInfo.profilePhoto).width(400).height(400).url()} 
-                alt={`${personalInfo.name} - ${personalInfo.title}`} 
-                className="w-full h-full object-cover"
-              />
+              {personalInfo?.profilePhoto ? (
+                <img 
+                  src={urlFor(personalInfo.profilePhoto).width(400).height(400).url()} 
+                  alt={`${displayInfo.name} - ${displayInfo.title}`} 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <img 
+                  src="/images/profile.jpg" 
+                  alt={`${displayInfo.name} - ${displayInfo.title}`} 
+                  className="w-full h-full object-cover"
+                />
+              )}
             </div>
             {/* Floating badge */}
             <div className="absolute bottom-4 right-4 bg-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 border-l-4 border-academic-500">

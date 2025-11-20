@@ -141,7 +141,17 @@ const Gallery: React.FC = () => {
         {/* Empty State */}
         {filteredItems.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-slate-500 text-lg">No photos in this category yet.</p>
+            <div className="mb-4">
+              <p className="text-slate-700 text-lg font-semibold mb-2">No gallery photos yet</p>
+              <p className="text-slate-500">Add photos through your admin panel at <a href="https://saad.sanity.studio" target="_blank" rel="noopener noreferrer" className="text-academic-600 hover:underline">saad.sanity.studio</a></p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="aspect-[4/3] bg-slate-100 rounded-lg flex items-center justify-center">
+                  <p className="text-slate-400">Upload Photo {i}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

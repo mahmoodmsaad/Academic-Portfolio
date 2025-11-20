@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Briefcase, GraduationCap, Calendar, MapPin } from 'lucide-react';
 import { client } from '../sanity/client';
+import { EXPERIENCE, EDUCATION } from '../constants';
 
 interface ExperienceItem {
   _id: string;
@@ -24,8 +25,10 @@ const Experience: React.FC = () => {
         const query = `*[_type == "experience"] | order(order asc, date desc)`;
         const items = await client.fetch(query);
         
-        setExperiences(items.filter((item: ExperienceItem) => item.type === 'experience'));
-        setEducation(items.filter((item: ExperienceItem) => item.type === 'education'));
+        if (items && items.length > 0) {
+          setExperiences(items.filter((item: ExperienceItem) => item.type === 'experience'));
+          setEducation(items.filter((item: ExperienceItem) => item.type === 'education'));
+        }
       } catch (error) {
         console.error('Error fetching experience:', error);
       } finally {
@@ -35,6 +38,10 @@ const Experience: React.FC = () => {
 
     fetchData();
   }, []);
+
+  // Use Sanity data if available, otherwise fallback to constants
+  const displayExperience = experiences.length > 0 ? experiences : EXPERIENCE;
+  const displayEducation = education.length > 0 ? education : EDUCATION;
 
   if (loading) {
     return (
@@ -67,8 +74,8 @@ const Experience: React.FC = () => {
               <h4 className="text-2xl font-bold text-slate-800">Work Experience</h4>
             </div>
             <div className="border-l-2 border-slate-200 ml-6 space-y-10 pb-4">
-              {experiences.map((item) => (
-                <div key={item._id} className="relative pl-10">
+              {displayExperience.map((item) => (
+                <div key={item._id || item.id} className="relative pl-10">
                   <div className="absolute -left-[9px] top-2 w-4 h-4 rounded-full bg-academic-500 border-4 border-white shadow-sm"></div>
                   
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-2">
@@ -102,8 +109,8 @@ const Experience: React.FC = () => {
               <h4 className="text-2xl font-bold text-slate-800">Education</h4>
             </div>
             <div className="border-l-2 border-slate-200 ml-6 space-y-10 pb-4">
-              {education.map((item) => (
-                <div key={item._id} className="relative pl-10">
+              {displayEducation.map((item) => (
+                <div key={item._id || item.id} className="relative pl-10">
                   <div className="absolute -left-[9px] top-2 w-4 h-4 rounded-full bg-green-500 border-4 border-white shadow-sm"></div>
                   
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-2">
