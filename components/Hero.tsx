@@ -1,8 +1,49 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, Linkedin, Github, Mail } from 'lucide-react';
-import { PERSONAL_DETAILS, SOCIAL_LINKS } from '../constants';
+import { client, urlFor } from '../sanity/client';
+
+interface PersonalInfo {
+  name: string;
+  title: string;
+  tagline: string;
+  location: string;
+  email: string;
+  about: string;
+  profilePhoto: any;
+  cvFile?: any;
+}
+
+interface SocialLink {
+  platform: string;
+  url: string;
+  icon: string;
+}
 
 const Hero: React.FC = () => {
+  const [personalInfo, setPersonalInfo] = useState<PersonalInfo | null>(null);
+  const [socialLinks, setSocialLinks] = useState<SocialLink[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [info, links] = await Promise.all([
+          client.fetch(`*[_type == "personalInfo"][0]`),
+          client.fetch(`*[_type == "socialLink"] | order(_createdAt asc)`)
+        ]);
+        
+        setPersonalInfo(info);
+        setSocialLinks(links);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   const getIcon = (iconName: string) => {
     switch (iconName) {
       case 'linkedin': return <Linkedin className="w-6 h-6" />;
@@ -11,6 +52,24 @@ const Hero: React.FC = () => {
       default: return null;
     }
   };
+
+  const handleDownloadCV = () => {
+    if (personalInfo?.cvFile?.asset?.url) {
+      window.open(personalInfo.cvFile.asset.url, '_blank');
+    } else {
+      alert('CV not available. Please upload in admin panel.');
+    }
+  };
+
+  if (loading || !personalInfo) {
+    return (
+      <section id="home" className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-academic-50 pt-16">
+        <div className="text-center">
+          <p className="text-slate-500">Loading...</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section id="home" className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-academic-50 pt-16">
@@ -22,13 +81,13 @@ const Hero: React.FC = () => {
             Available for Collaboration
           </div>
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold font-serif text-slate-900 mb-4 leading-tight">
-            {PERSONAL_DETAILS.name}
+            {personalInfo.name}
           </h1>
           <h2 className="text-xl md:text-2xl text-academic-600 font-medium mb-6">
-            {PERSONAL_DETAILS.title}
+            {personalInfo.title}
           </h2>
           <p className="text-lg text-slate-600 mb-8 max-w-lg mx-auto md:mx-0 leading-relaxed">
-            {PERSONAL_DETAILS.tagline}
+            {personalInfo.tagline}
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
@@ -40,7 +99,7 @@ const Hero: React.FC = () => {
             </a>
             <button 
               className="px-8 py-3 border border-slate-300 bg-white text-slate-700 rounded-lg hover:border-academic-400 hover:text-academic-600 transition-all duration-300 font-medium flex items-center justify-center gap-2 shadow-sm"
-              onClick={() => alert('CV Download would be triggered here.')}
+              onClick={handleDownloadCV}
             >
               <Download size={18} />
               Download CV
@@ -48,7 +107,7 @@ const Hero: React.FC = () => {
           </div>
 
           <div className="mt-10 flex gap-6 justify-center md:justify-start">
-            {SOCIAL_LINKS.map((link) => (
+            {socialLinks.map((link) => (
               <a 
                 key={link.platform}
                 href={link.url}
@@ -70,8 +129,8 @@ const Hero: React.FC = () => {
             <div className="absolute top-0 right-0 -mr-4 -mt-4 w-full h-full rounded-full bg-academic-200 opacity-50 blur-3xl animate-pulse"></div>
             <div className="relative w-full h-full rounded-full overflow-hidden border-4 border-white shadow-2xl">
               <img 
-                src="/images/profile.jpg" 
-                alt="M Saad Mahmood - PhD Researcher in Computational Chemistry" 
+                src={urlFor(personalInfo.profilePhoto).width(400).height(400).url()} 
+                alt={`${personalInfo.name} - ${personalInfo.title}`} 
                 className="w-full h-full object-cover"
               />
             </div>

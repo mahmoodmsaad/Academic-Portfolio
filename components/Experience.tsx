@@ -1,8 +1,52 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Briefcase, GraduationCap, Calendar, MapPin } from 'lucide-react';
-import { EXPERIENCE, EDUCATION } from '../constants';
+import { client } from '../sanity/client';
+
+interface ExperienceItem {
+  _id: string;
+  title: string;
+  organization: string;
+  location: string;
+  date: string;
+  type: 'experience' | 'education';
+  description: string[];
+  order?: number;
+}
 
 const Experience: React.FC = () => {
+  const [experiences, setExperiences] = useState<ExperienceItem[]>([]);
+  const [education, setEducation] = useState<ExperienceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const query = `*[_type == "experience"] | order(order asc, date desc)`;
+        const items = await client.fetch(query);
+        
+        setExperiences(items.filter((item: ExperienceItem) => item.type === 'experience'));
+        setEducation(items.filter((item: ExperienceItem) => item.type === 'education'));
+      } catch (error) {
+        console.error('Error fetching experience:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <section id="experience" className="py-20 bg-slate-50">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <p className="text-slate-500">Loading...</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
   return (
     <section id="experience" className="py-20 bg-slate-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -23,8 +67,8 @@ const Experience: React.FC = () => {
               <h4 className="text-2xl font-bold text-slate-800">Work Experience</h4>
             </div>
             <div className="border-l-2 border-slate-200 ml-6 space-y-10 pb-4">
-              {EXPERIENCE.map((item) => (
-                <div key={item.id} className="relative pl-10">
+              {experiences.map((item) => (
+                <div key={item._id} className="relative pl-10">
                   <div className="absolute -left-[9px] top-2 w-4 h-4 rounded-full bg-academic-500 border-4 border-white shadow-sm"></div>
                   
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-2">
@@ -58,8 +102,8 @@ const Experience: React.FC = () => {
               <h4 className="text-2xl font-bold text-slate-800">Education</h4>
             </div>
             <div className="border-l-2 border-slate-200 ml-6 space-y-10 pb-4">
-              {EDUCATION.map((item) => (
-                <div key={item.id} className="relative pl-10">
+              {education.map((item) => (
+                <div key={item._id} className="relative pl-10">
                   <div className="absolute -left-[9px] top-2 w-4 h-4 rounded-full bg-green-500 border-4 border-white shadow-sm"></div>
                   
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-2">
