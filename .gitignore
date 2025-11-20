@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Sanity
+studio/dist
+studio/.sanity
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

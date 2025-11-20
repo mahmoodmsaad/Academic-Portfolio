@@ -1,52 +1,45 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { client, urlFor } from '../sanity/client';
 
 interface GalleryItem {
-  id: string;
-  image: string;
+  _id: string;
+  image: any;
   title: string;
   description: string;
   date: string;
   category: string;
+  order?: number;
 }
 
-const GALLERY_ITEMS: GalleryItem[] = [
-  {
-    id: "1",
-    image: "/images/gallery/activity1.jpg",
-    title: "Research Laboratory Work",
-    description: "Working on computational chemistry simulations at the University of Trieste.",
-    date: "2024",
-    category: "Research"
-  },
-  {
-    id: "2",
-    image: "/images/gallery/activity2.jpg",
-    title: "Conference Presentation",
-    description: "Presenting findings on 2D materials at international conference.",
-    date: "2024",
-    category: "Conference"
-  },
-  {
-    id: "3",
-    image: "/images/gallery/activity3.jpg",
-    title: "Lab Equipment Training",
-    description: "Learning ARPES and XPS characterization techniques.",
-    date: "2025",
-    category: "Training"
-  },
-  // Add more items as you upload photos
-];
-
 const Gallery: React.FC = () => {
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  const [loading, setLoading] = useState(true);
 
-  const categories = ["All", ...Array.from(new Set(GALLERY_ITEMS.map(item => item.category)))];
+  // Fetch gallery items from Sanity
+  useEffect(() => {
+    const fetchGalleryItems = async () => {
+      try {
+        const query = `*[_type == "galleryItem"] | order(order asc, _createdAt desc)`;
+        const items = await client.fetch(query);
+        setGalleryItems(items);
+      } catch (error) {
+        console.error('Error fetching gallery:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchGalleryItems();
+  }, []);
+
+  const categories = ["All", ...Array.from(new Set(galleryItems.map(item => item.category)))];
   
   const filteredItems = selectedCategory === "All" 
-    ? GALLERY_ITEMS 
-    : GALLERY_ITEMS.filter(item => item.category === selectedCategory);
+    ? galleryItems 
+    : galleryItems.filter(item => item.category === selectedCategory);
 
   const openLightbox = (item: GalleryItem) => {
     setSelectedImage(item);
@@ -58,7 +51,7 @@ const Gallery: React.FC = () => {
 
   const navigateImage = (direction: 'prev' | 'next') => {
     if (!selectedImage) return;
-    const currentIndex = filteredItems.findIndex(item => item.id === selectedImage.id);
+    const currentIndex = filteredItems.findIndex(item => item._id === selectedImage._id);
     let newIndex;
     
     if (direction === 'next') {
@@ -69,6 +62,18 @@ const Gallery: React.FC = () => {
     
     setSelectedImage(filteredItems[newIndex]);
   };
+
+  if (loading) {
+    return (
+      <section id="gallery" className="py-20 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <p className="text-slate-500">Loading gallery...</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section id="gallery" className="py-20 bg-slate-50">
@@ -104,20 +109,16 @@ const Gallery: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredItems.map((item) => (
             <div
-              key={item.id}
+              key={item._id}
               onClick={() => openLightbox(item)}
               className="group relative overflow-hidden rounded-lg shadow-md hover:shadow-xl transition-all duration-300 cursor-pointer bg-white"
             >
               {/* Image */}
               <div className="aspect-[4/3] overflow-hidden bg-slate-100">
                 <img
-                  src={item.image}
+                  src={urlFor(item.image).width(600).height(450).url()}
                   alt={item.title}
                   className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                  onError={(e) => {
-                    // Fallback if image doesn't exist yet
-                    (e.target as HTMLImageElement).src = 'https://via.placeholder.com/600x450/0284c7/ffffff?text=Upload+Photo';
-                  }}
                 />
               </div>
               
@@ -178,12 +179,9 @@ const Gallery: React.FC = () => {
               onClick={(e) => e.stopPropagation()}
             >
               <img
-                src={selectedImage.image}
+                src={urlFor(selectedImage.image).width(1200).url()}
                 alt={selectedImage.title}
                 className="w-full h-auto max-h-[80vh] object-contain rounded-lg"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/1200x900/0284c7/ffffff?text=Upload+Photo';
-                }}
               />
               
               {/* Image Info */}
