@@ -15,4 +15,20 @@ export default defineConfig({
   schema: {
     types: schemaTypes,
   },
+
+  // Allow CORS from your production domain
+  cors: {
+    origins: [
+      'http://localhost:3002',
+      'http://localhost:5173',
+      'https://mah-mood.live',
+      'https://*.amplifyapp.com'
+    ]
+  },
+
+  // API configuration
+  api: {
+    projectId: 'svudrtoe',
+    dataset: 'production',
+  }
 })

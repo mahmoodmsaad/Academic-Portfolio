@@ -31,6 +31,7 @@ const Experience: React.FC = () => {
         }
       } catch (error) {
         console.error('Error fetching experience:', error);
+        // On error, fallback will be used automatically
       } finally {
         setLoading(false);
       }
@@ -43,17 +44,6 @@ const Experience: React.FC = () => {
   const displayExperience = experiences.length > 0 ? experiences : EXPERIENCE;
   const displayEducation = education.length > 0 ? education : EDUCATION;
 
-  if (loading) {
-    return (
-      <section id="experience" className="py-20 bg-slate-50">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-slate-500">Loading...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
   return (
     <section id="experience" className="py-20 bg-slate-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">

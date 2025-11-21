@@ -22,15 +22,15 @@ const Navbar: React.FC = () => {
   ];
 
   return (
-    <nav className={`fixed w-full z-50 transition-all duration-300 ${scrolled ? 'bg-white/90 backdrop-blur-md shadow-md py-4' : 'bg-transparent py-6'}`}>
+    <nav className={`fixed w-full z-50 transition-all duration-300 ${scrolled ? 'bg-white/80 backdrop-blur-lg shadow-lg py-3 border-b border-white/20' : 'bg-transparent py-6'}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center">
           <div className="flex-shrink-0">
-            <a href="#" className="text-2xl font-serif font-bold text-academic-800">
+            <a href="#" className="text-2xl font-serif font-bold text-academic-800 tracking-tight">
               M.S. Mahmood
             </a>
           </div>
-          
+
           {/* Desktop Menu */}
           <div className="hidden md:block">
             <div className="ml-10 flex items-baseline space-x-8">
@@ -38,7 +38,7 @@ const Navbar: React.FC = () => {
                 <a
                   key={link.name}
                   href={link.href}
-                  className="text-slate-600 hover:text-academic-600 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                  className="text-slate-600 hover:text-academic-600 px-3 py-2 rounded-md text-sm font-medium transition-all duration-300 hover:bg-academic-50"
                 >
                   {link.name}
                 </a>

@@ -29,6 +29,7 @@ const Research: React.FC = () => {
         }
       } catch (error) {
         console.error('Error fetching publications:', error);
+        // On error, fallback will be used automatically
       } finally {
         setLoading(false);
       }
@@ -40,17 +41,6 @@ const Research: React.FC = () => {
   // Use Sanity data if available, otherwise fallback to constants
   const displayPublications = publications.length > 0 ? publications : PUBLICATIONS;
 
-  if (loading) {
-    return (
-      <section id="research" className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-slate-500">Loading...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
   return (
     <section id="research" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

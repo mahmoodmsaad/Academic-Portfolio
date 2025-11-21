@@ -24,9 +24,11 @@ const Gallery: React.FC = () => {
       try {
         const query = `*[_type == "galleryItem"] | order(order asc, _createdAt desc)`;
         const items = await client.fetch(query);
-        setGalleryItems(items);
+        setGalleryItems(items || []);
       } catch (error) {
         console.error('Error fetching gallery:', error);
+        // On error, show empty state
+        setGalleryItems([]);
       } finally {
         setLoading(false);
       }
@@ -62,18 +64,6 @@ const Gallery: React.FC = () => {
     
     setSelectedImage(filteredItems[newIndex]);
   };
-
-  if (loading) {
-    return (
-      <section id="gallery" className="py-20 bg-slate-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-slate-500">Loading gallery...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
 
   return (
     <section id="gallery" className="py-20 bg-slate-50">
