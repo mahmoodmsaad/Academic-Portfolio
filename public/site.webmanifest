@@ -1,0 +1,22 @@
+{
+  "name": "M Saad Mahmood - Academic Portfolio",
+  "short_name": "M.S. Mahmood",
+  "description": "PhD Researcher in Computational Chemistry & Materials Science",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d9488",
+  "icons": [
+    {
+      "src": "/images/profile.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
