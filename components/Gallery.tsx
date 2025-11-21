@@ -148,13 +148,13 @@ const Gallery: React.FC = () => {
         {/* Lightbox Modal */}
         {selectedImage && (
           <div 
-            className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4 overflow-y-auto"
             onClick={closeLightbox}
           >
             {/* Close Button */}
             <button
               onClick={closeLightbox}
-              className="absolute top-4 right-4 text-white hover:text-academic-400 transition-colors z-10"
+              className="fixed top-4 right-4 text-white hover:text-academic-400 transition-colors z-10"
             >
               <X size={32} />
             </button>
@@ -162,30 +162,30 @@ const Gallery: React.FC = () => {
             {/* Navigation Buttons */}
             <button
               onClick={(e) => { e.stopPropagation(); navigateImage('prev'); }}
-              className="absolute left-4 text-white hover:text-academic-400 transition-colors z-10"
+              className="fixed left-4 top-1/2 -translate-y-1/2 text-white hover:text-academic-400 transition-colors z-10"
             >
               <ChevronLeft size={40} />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); navigateImage('next'); }}
-              className="absolute right-4 text-white hover:text-academic-400 transition-colors z-10"
+              className="fixed right-4 top-1/2 -translate-y-1/2 text-white hover:text-academic-400 transition-colors z-10"
             >
               <ChevronRight size={40} />
             </button>
 
             {/* Image Container */}
             <div 
-              className="max-w-5xl w-full"
+              className="max-w-5xl w-full my-8"
               onClick={(e) => e.stopPropagation()}
             >
               <img
                 src={urlFor(selectedImage.image).width(1200).url()}
                 alt={selectedImage.title}
-                className="w-full h-auto max-h-[80vh] object-contain rounded-lg"
+                className="w-full h-auto max-h-[60vh] object-contain rounded-lg"
               />
               
               {/* Image Info */}
-              <div className="bg-white rounded-lg p-6 mt-4">
+              <div className="bg-white rounded-lg p-6 mt-4 max-h-[30vh] overflow-y-auto">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="px-3 py-1 bg-academic-100 text-academic-700 text-xs font-semibold rounded-full">
                     {selectedImage.category}
@@ -193,7 +193,7 @@ const Gallery: React.FC = () => {
                   <span className="text-slate-500 text-sm">{selectedImage.date}</span>
                 </div>
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">{selectedImage.title}</h3>
-                <p className="text-slate-600">{selectedImage.description}</p>
+                <p className="text-slate-600 leading-relaxed">{selectedImage.description}</p>
               </div>
             </div>
           </div>
