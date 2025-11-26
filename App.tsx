@@ -4,6 +4,7 @@ import Hero from './components/Hero';
 import About from './components/About';
 import Experience from './components/Experience';
 import Research from './components/Research';
+import MatrixOptimizer from './components/MatrixOptimizer';
 import Gallery from './components/Gallery';
 import Contact from './components/Contact';
 import Footer from './components/Footer';
@@ -17,6 +18,7 @@ function App() {
         <About />
         <Experience />
         <Research />
+        <MatrixOptimizer />
         <Gallery />
         <Contact />
       </main>
