@@ -14,6 +14,9 @@ interface OptimizationResult {
 }
 
 const MatrixOptimizer: React.FC = () => {
+  // TODO: Replace with your actual API endpoint after deployment
+  const API_ENDPOINT = process.env.REACT_APP_MATRIX_API || '';
+  
   const [targetA, setTargetA] = useState('22.0');
   const [targetB, setTargetB] = useState('22.0');
   const [targetGamma, setTargetGamma] = useState('80.0');
@@ -28,47 +31,74 @@ const MatrixOptimizer: React.FC = () => {
     setResults([]);
 
     try {
-      // Simulated optimization (in production, this would call a backend API)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (API_ENDPOINT) {
+        // Real API call
+        const response = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            target_a: parseFloat(targetA),
+            target_b: parseFloat(targetB),
+            target_gamma: parseFloat(targetGamma),
+            max_val: parseInt(maxVal),
+          }),
+        });
 
-      // Mock results for demonstration
-      const mockResults: OptimizationResult[] = [
-        {
-          matrix: [[7, 0, 0], [0, 7, 0], [0, 0, 1]],
-          lattice_a: 21.98,
-          lattice_b: 22.03,
-          lattice_c: 5.24,
-          alpha: 90.0,
-          beta: 90.0,
-          gamma: 79.8,
-          num_atoms: 98,
-          score: 0.024
-        },
-        {
-          matrix: [[6, 1, 0], [-1, 6, 0], [0, 0, 1]],
-          lattice_a: 21.87,
-          lattice_b: 21.92,
-          lattice_c: 5.24,
-          alpha: 90.1,
-          beta: 90.0,
-          gamma: 80.3,
-          num_atoms: 74,
-          score: 0.031
-        },
-        {
-          matrix: [[5, 2, 0], [2, 5, 0], [0, 0, 1]],
-          lattice_a: 22.15,
-          lattice_b: 22.10,
-          lattice_c: 5.24,
-          alpha: 89.9,
-          beta: 90.1,
-          gamma: 79.6,
-          num_atoms: 58,
-          score: 0.038
+        if (!response.ok) {
+          throw new Error('Optimization failed');
         }
-      ];
 
-      setResults(mockResults);
+        const data = await response.json();
+        
+        if (data.success) {
+          setResults(data.results);
+        } else {
+          throw new Error(data.error || 'Optimization failed');
+        }
+      } else {
+        // Demo mode - simulated results
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        const mockResults: OptimizationResult[] = [
+          {
+            matrix: [[7, 0, 0], [0, 7, 0], [0, 0, 1]],
+            lattice_a: 21.98,
+            lattice_b: 22.03,
+            lattice_c: 5.24,
+            alpha: 90.0,
+            beta: 90.0,
+            gamma: 79.8,
+            num_atoms: 98,
+            score: 0.024
+          },
+          {
+            matrix: [[6, 1, 0], [-1, 6, 0], [0, 0, 1]],
+            lattice_a: 21.87,
+            lattice_b: 21.92,
+            lattice_c: 5.24,
+            alpha: 90.1,
+            beta: 90.0,
+            gamma: 80.3,
+            num_atoms: 74,
+            score: 0.031
+          },
+          {
+            matrix: [[5, 2, 0], [2, 5, 0], [0, 0, 1]],
+            lattice_a: 22.15,
+            lattice_b: 22.10,
+            lattice_c: 5.24,
+            alpha: 89.9,
+            beta: 90.1,
+            gamma: 79.6,
+            num_atoms: 58,
+            score: 0.038
+          }
+        ];
+
+        setResults(mockResults);
+      }
     } catch (err) {
       setError('Optimization failed. Please check your parameters.');
     } finally {

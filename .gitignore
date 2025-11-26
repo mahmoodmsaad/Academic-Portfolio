@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Environment variables
+.env
+.env.local
+
 # Sanity
 studio/dist
 studio/.sanity

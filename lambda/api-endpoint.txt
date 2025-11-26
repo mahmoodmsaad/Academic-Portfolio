@@ -1,0 +1,1 @@
+﻿https://oy34w61rc6.execute-api.us-east-1.amazonaws.com/optimize
