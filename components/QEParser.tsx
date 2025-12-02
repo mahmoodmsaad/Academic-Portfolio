@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Download, AlertCircle, CheckCircle, Atom, ArrowRightLeft, Sparkles, Copy, Check } from 'lucide-react';
+import { Upload, FileText, Download, AlertCircle, CheckCircle, Atom, ArrowRightLeft, Sparkles, Copy, Check, Brain, Zap, Settings, ChevronDown } from 'lucide-react';
 
 interface ParsedStructure {
   formula: string;
@@ -19,6 +19,8 @@ interface ParsedStructure {
     z: number;
   }>;
   cellVectors: number[][];
+  elements: string[];
+  volume: number;
 }
 
 interface ConversionResult {
@@ -28,6 +30,10 @@ interface ConversionResult {
 }
 
 const QEParser: React.FC = () => {
+  // Main tool selection
+  const [activeTool, setActiveTool] = useState<'converter' | 'dft-assistant'>('converter');
+  
+  // Converter state
   const [file, setFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
   const [parsedData, setParsedData] = useState<ParsedStructure | null>(null);
@@ -37,7 +43,22 @@ const QEParser: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'structure' | 'cif' | 'xyz' | 'poscar'>('structure');
   const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // DFT Assistant state
+  const [dftFile, setDftFile] = useState<File | null>(null);
+  const [dftFileContent, setDftFileContent] = useState<string>('');
+  const [dftParsedData, setDftParsedData] = useState<ParsedStructure | null>(null);
+  const [calcType, setCalcType] = useState<string>('scf');
+  const [functional, setFunctional] = useState<string>('PBE');
+  const [apiKey, setApiKey] = useState<string>('');
+  const [dftAdvice, setDftAdvice] = useState<string>('');
+  const [qeTemplate, setQeTemplate] = useState<string>('');
+  const [isDftProcessing, setIsDftProcessing] = useState(false);
+  const [dftError, setDftError] = useState<string>('');
+  const [generateTemplate, setGenerateTemplate] = useState<boolean>(true);
+  const dftFileInputRef = useRef<HTMLInputElement>(null);
 
+  // File handling for converter
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
     if (uploadedFile) {
@@ -73,17 +94,65 @@ const QEParser: React.FC = () => {
     }
   };
 
+  // File handling for DFT assistant
+  const handleDftFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFile = e.target.files?.[0];
+    if (uploadedFile) {
+      setDftFile(uploadedFile);
+      setDftError('');
+      setDftParsedData(null);
+      setDftAdvice('');
+      setQeTemplate('');
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setDftFileContent(content);
+        try {
+          const parsed = parseQEOutput(content);
+          setDftParsedData(parsed);
+        } catch {
+          // Will show error when user tries to get advice
+        }
+      };
+      reader.readAsText(uploadedFile);
+    }
+  };
+
+  const handleDftDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) {
+      setDftFile(droppedFile);
+      setDftError('');
+      setDftParsedData(null);
+      setDftAdvice('');
+      setQeTemplate('');
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setDftFileContent(content);
+        try {
+          const parsed = parseQEOutput(content);
+          setDftParsedData(parsed);
+        } catch {
+          // Will show error when user tries to get advice
+        }
+      };
+      reader.readAsText(droppedFile);
+    }
+  };
+
   const parseQEOutput = (content: string): ParsedStructure => {
     const lines = content.split('\n');
     
-    // Extract cell parameters
     let cellVectors: number[][] = [];
     let atoms: Array<{symbol: string; x: number; y: number; z: number}> = [];
     
-    // Find CELL_PARAMETERS block (last occurrence)
     for (let i = lines.length - 1; i >= 0; i--) {
       if (lines[i].trim().toUpperCase().startsWith('CELL_PARAMETERS')) {
-        const unit = lines[i].includes('bohr') ? 0.529177 : 1; // Convert bohr to angstrom
+        const unit = lines[i].includes('bohr') ? 0.529177 : 1;
         cellVectors = [];
         for (let j = 1; j <= 3; j++) {
           if (i + j < lines.length) {
@@ -97,7 +166,6 @@ const QEParser: React.FC = () => {
       }
     }
     
-    // Find ATOMIC_POSITIONS block (last occurrence)
     for (let i = lines.length - 1; i >= 0; i--) {
       if (lines[i].trim().toUpperCase().startsWith('ATOMIC_POSITIONS')) {
         const isCrystal = lines[i].toLowerCase().includes('crystal');
@@ -114,7 +182,6 @@ const QEParser: React.FC = () => {
             let y = parseFloat(parts[2]);
             let z = parseFloat(parts[3]);
             
-            // Convert fractional to cartesian if needed
             if (isCrystal && cellVectors.length === 3) {
               const fx = x, fy = y, fz = z;
               x = fx * cellVectors[0][0] + fy * cellVectors[1][0] + fz * cellVectors[2][0];
@@ -138,7 +205,6 @@ const QEParser: React.FC = () => {
       throw new Error('Could not find valid ATOMIC_POSITIONS block');
     }
     
-    // Calculate cell parameters from vectors
     const a = Math.sqrt(cellVectors[0][0]**2 + cellVectors[0][1]**2 + cellVectors[0][2]**2);
     const b = Math.sqrt(cellVectors[1][0]**2 + cellVectors[1][1]**2 + cellVectors[1][2]**2);
     const c = Math.sqrt(cellVectors[2][0]**2 + cellVectors[2][1]**2 + cellVectors[2][2]**2);
@@ -148,7 +214,13 @@ const QEParser: React.FC = () => {
     const beta = Math.acos(dot(cellVectors[0], cellVectors[2]) / (a * c)) * 180 / Math.PI;
     const gamma = Math.acos(dot(cellVectors[0], cellVectors[1]) / (a * b)) * 180 / Math.PI;
     
-    // Get chemical formula
+    const cross = [
+      cellVectors[0][1]*cellVectors[1][2] - cellVectors[0][2]*cellVectors[1][1],
+      cellVectors[0][2]*cellVectors[1][0] - cellVectors[0][0]*cellVectors[1][2],
+      cellVectors[0][0]*cellVectors[1][1] - cellVectors[0][1]*cellVectors[1][0]
+    ];
+    const volume = Math.abs(dot(cross, cellVectors[2]));
+    
     const elementCounts: {[key: string]: number} = {};
     atoms.forEach(atom => {
       elementCounts[atom.symbol] = (elementCounts[atom.symbol] || 0) + 1;
@@ -156,20 +228,21 @@ const QEParser: React.FC = () => {
     const formula = Object.entries(elementCounts)
       .map(([el, count]) => count > 1 ? `${el}${count}` : el)
       .join('');
+    const elements = [...new Set(atoms.map(a => a.symbol))];
     
     return {
       formula,
       numAtoms: atoms.length,
       cellParams: { a, b, c, alpha, beta, gamma },
       atoms,
-      cellVectors
+      cellVectors,
+      elements,
+      volume
     };
   };
 
   const generateCIF = (data: ParsedStructure): string => {
     const { cellParams, atoms, cellVectors } = data;
-    
-    // Calculate fractional coordinates
     const inv = invertMatrix(cellVectors);
     
     let cif = `data_structure\n`;
@@ -208,7 +281,6 @@ const QEParser: React.FC = () => {
   const generatePOSCAR = (data: ParsedStructure): string => {
     const { atoms, cellVectors } = data;
     
-    // Group atoms by element
     const elementOrder: string[] = [];
     const elementCounts: {[key: string]: number} = {};
     const sortedAtoms: typeof atoms = [];
@@ -240,6 +312,89 @@ const QEParser: React.FC = () => {
     return poscar;
   };
 
+  const generateQEInputTemplate = (data: ParsedStructure): string => {
+    const { formula, atoms, cellVectors, elements, numAtoms } = data;
+    
+    const atomicMasses: {[key: string]: number} = {
+      'H': 1.008, 'He': 4.003, 'Li': 6.941, 'Be': 9.012, 'B': 10.81, 'C': 12.01,
+      'N': 14.01, 'O': 16.00, 'F': 19.00, 'Ne': 20.18, 'Na': 22.99, 'Mg': 24.31,
+      'Al': 26.98, 'Si': 28.09, 'P': 30.97, 'S': 32.07, 'Cl': 35.45, 'Ar': 39.95,
+      'K': 39.10, 'Ca': 40.08, 'Sc': 44.96, 'Ti': 47.87, 'V': 50.94, 'Cr': 52.00,
+      'Mn': 54.94, 'Fe': 55.85, 'Co': 58.93, 'Ni': 58.69, 'Cu': 63.55, 'Zn': 65.38,
+      'Ga': 69.72, 'Ge': 72.63, 'As': 74.92, 'Se': 78.97, 'Br': 79.90, 'Kr': 83.80
+    };
+    
+    const lines: string[] = [];
+    
+    lines.push('&CONTROL');
+    lines.push(`  calculation = '${calcType}'`);
+    lines.push(`  prefix = '${formula.toLowerCase()}'`);
+    lines.push("  outdir = './tmp'");
+    lines.push("  pseudo_dir = './pseudo'");
+    lines.push("  verbosity = 'high'");
+    if (calcType === 'relax' || calcType === 'vc-relax') {
+      lines.push("  tprnfor = .true.");
+      lines.push("  tstress = .true.");
+    }
+    lines.push('/\n');
+    
+    lines.push('&SYSTEM');
+    lines.push('  ibrav = 0');
+    lines.push(`  nat = ${numAtoms}`);
+    lines.push(`  ntyp = ${elements.length}`);
+    lines.push('  ecutwfc = 60.0');
+    lines.push('  ecutrho = 480.0');
+    lines.push("  occupations = 'smearing'");
+    lines.push("  smearing = 'gaussian'");
+    lines.push('  degauss = 0.01');
+    lines.push('/\n');
+    
+    lines.push('&ELECTRONS');
+    lines.push('  conv_thr = 1.0d-8');
+    lines.push('  mixing_beta = 0.7');
+    lines.push('/\n');
+    
+    if (calcType === 'relax' || calcType === 'vc-relax') {
+      lines.push('&IONS');
+      lines.push("  ion_dynamics = 'bfgs'");
+      lines.push('/\n');
+    }
+    
+    if (calcType === 'vc-relax') {
+      lines.push('&CELL');
+      lines.push("  cell_dynamics = 'bfgs'");
+      lines.push('/\n');
+    }
+    
+    lines.push('ATOMIC_SPECIES');
+    elements.forEach(el => {
+      const mass = atomicMasses[el] || 1.0;
+      lines.push(`  ${el}  ${mass.toFixed(4)}  ${el}.UPF`);
+    });
+    lines.push('');
+    
+    lines.push('CELL_PARAMETERS angstrom');
+    cellVectors.forEach(v => {
+      lines.push(`  ${v[0].toFixed(10)} ${v[1].toFixed(10)} ${v[2].toFixed(10)}`);
+    });
+    lines.push('');
+    
+    const inv = invertMatrix(cellVectors);
+    lines.push('ATOMIC_POSITIONS crystal');
+    atoms.forEach(atom => {
+      const fx = inv[0][0]*atom.x + inv[0][1]*atom.y + inv[0][2]*atom.z;
+      const fy = inv[1][0]*atom.x + inv[1][1]*atom.y + inv[1][2]*atom.z;
+      const fz = inv[2][0]*atom.x + inv[2][1]*atom.y + inv[2][2]*atom.z;
+      lines.push(`  ${atom.symbol}  ${fx.toFixed(10)} ${fy.toFixed(10)} ${fz.toFixed(10)}`);
+    });
+    lines.push('');
+    
+    lines.push('K_POINTS automatic');
+    lines.push('  4 4 4 0 0 0');
+    
+    return lines.join('\n');
+  };
+
   const invertMatrix = (m: number[][]): number[][] => {
     const det = m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1]) 
               - m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0]) 
@@ -266,13 +421,11 @@ const QEParser: React.FC = () => {
     setError('');
 
     try {
-      // Simulate processing delay
       await new Promise(resolve => setTimeout(resolve, 500));
       
       const parsed = parseQEOutput(fileContent);
       setParsedData(parsed);
       
-      // Generate all formats
       setConversionResults({
         cif: generateCIF(parsed),
         xyz: generateXYZ(parsed),
@@ -284,6 +437,91 @@ const QEParser: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to parse file');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const getDftAdvice = async () => {
+    if (!dftFileContent) {
+      setDftError('Please upload a structure file first');
+      return;
+    }
+
+    setIsDftProcessing(true);
+    setDftError('');
+    setDftAdvice('');
+    setQeTemplate('');
+
+    try {
+      let structureData = dftParsedData;
+      if (!structureData) {
+        structureData = parseQEOutput(dftFileContent);
+        setDftParsedData(structureData);
+      }
+
+      const volumePerAtom = structureData.volume / structureData.numAtoms;
+      const prompt = `I need help setting up a Quantum ESPRESSO DFT calculation with these parameters:
+
+**Structure Information:**
+- Chemical formula: ${structureData.formula}
+- Elements present: ${structureData.elements.join(', ')}
+- Number of atoms: ${structureData.numAtoms}
+- Cell dimensions (Å): a=${structureData.cellParams.a.toFixed(3)}, b=${structureData.cellParams.b.toFixed(3)}, c=${structureData.cellParams.c.toFixed(3)}
+- Cell angles (°): α=${structureData.cellParams.alpha.toFixed(1)}, β=${structureData.cellParams.beta.toFixed(1)}, γ=${structureData.cellParams.gamma.toFixed(1)}
+- Volume per atom: ${volumePerAtom.toFixed(2)} Å³
+
+**Calculation Settings:**
+- Calculation type: ${calcType}
+- XC Functional: ${functional}
+
+Please provide specific recommendations for:
+
+1. **K-point grid**: Recommend optimal k-point mesh based on cell size and calculation type.
+2. **Cutoff energies**: Recommend ecutwfc and ecutrho values appropriate for the elements present.
+3. **Pseudopotentials**: Recommend specific pseudopotential types (NC, US, PAW) from SSSP or PseudoDojo.
+4. **Convergence parameters**: Suggest conv_thr for SCF, and forc_conv_thr/press_conv_thr for relaxations.
+5. **Smearing**: Recommend smearing type and degauss value based on material type.
+6. **Additional tips**: Element-specific considerations (DFT+U, SOC, vdW corrections).`;
+
+      const effectiveApiKey = apiKey;
+
+      const response = await fetch('https://api.perplexity.ai/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${effectiveApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'sonar',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert in Density Functional Theory (DFT) calculations using Quantum ESPRESSO. Provide detailed, practical recommendations for setting up calculations. Be specific with numerical values.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.2,
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setDftAdvice(data.choices[0].message.content);
+
+      if (generateTemplate) {
+        setQeTemplate(generateQEInputTemplate(structureData));
+      }
+
+    } catch (err) {
+      setDftError(err instanceof Error ? err.message : 'Failed to get DFT recommendations');
+    } finally {
+      setIsDftProcessing(false);
     }
   };
 
@@ -304,235 +542,440 @@ const QEParser: React.FC = () => {
   };
 
   const baseName = file?.name.replace(/\.[^/.]+$/, '') || 'structure';
+  const dftBaseName = dftFile?.name.replace(/\.[^/.]+$/, '') || 'structure';
 
   return (
     <section id="qe-parser" className="py-20 bg-gradient-to-br from-white to-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
         <div className="text-center mb-12">
           <h2 className="text-4xl md:text-5xl font-serif font-bold text-slate-900 mb-4">
-            QE Structure Converter
+            Quantum ESPRESSO Tools
           </h2>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            Parse Quantum ESPRESSO output files and convert structures to CIF, XYZ, or POSCAR formats
+            Structure conversion and AI-powered DFT setup assistance for computational materials science
           </p>
         </div>
 
-        <div className="max-w-5xl mx-auto">
-          <div className="bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
-            {/* Tool Header */}
-            <div className="flex items-center gap-4 mb-6">
-              <div className="p-3 bg-purple-100 rounded-lg">
-                <ArrowRightLeft className="w-8 h-8 text-purple-600" />
-              </div>
-              <div>
-                <h3 className="text-2xl font-bold text-slate-900">Structure Format Converter</h3>
-                <p className="text-slate-600">Upload QE output and get CIF, XYZ, POSCAR instantly</p>
-              </div>
-            </div>
-
-            {/* Info Box */}
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6 flex gap-3">
-              <Sparkles className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-purple-800">
-                <strong>Supported formats:</strong> Quantum ESPRESSO input (.in, .pw) and output (.out) files. 
-                Extracts CELL_PARAMETERS and ATOMIC_POSITIONS blocks and converts to standard crystallographic formats.
-              </div>
-            </div>
-
-            {/* File Upload Area */}
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-                ${file ? 'border-purple-400 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-purple-50'}`}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                onChange={handleFileUpload}
-                accept="*"
-                className="hidden"
-                title="Upload QE file"
-                aria-label="Upload Quantum ESPRESSO file"
-              />
-              <div onClick={() => fileInputRef.current?.click()}>
-              {file ? (
-                <div className="flex items-center justify-center gap-3">
-                  <FileText className="w-8 h-8 text-purple-600" />
-                  <div>
-                    <p className="font-medium text-slate-900">{file.name}</p>
-                    <p className="text-sm text-slate-500">{(file.size / 1024).toFixed(1)} KB</p>
-                  </div>
-                  <CheckCircle className="w-6 h-6 text-green-500" />
-                </div>
-              ) : (
-                <>
-                  <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-                  <p className="text-slate-600 font-medium">Drop your QE file here or click to browse</p>
-                  <p className="text-sm text-slate-400 mt-2">Supports .in, .pw, .out files</p>
-                </>
-              )}
-              </div>
-            </div>
-
-            {/* Parse Button */}
+        <div className="max-w-5xl mx-auto mb-8">
+          <div className="flex bg-slate-100 rounded-xl p-1">
             <button
-              onClick={processFile}
-              disabled={!file || isProcessing}
-              className={`w-full mt-6 py-4 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all
-                ${!file || isProcessing 
-                  ? 'bg-slate-300 cursor-not-allowed' 
-                  : 'bg-purple-600 hover:bg-purple-700 shadow-lg hover:shadow-xl'}`}
+              onClick={() => setActiveTool('converter')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-medium transition-all
+                ${activeTool === 'converter' 
+                  ? 'bg-white text-purple-600 shadow-md' 
+                  : 'text-slate-600 hover:text-slate-900'}`}
             >
-              {isProcessing ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Atom className="w-5 h-5" />
-                  Parse & Convert
-                </>
-              )}
+              <ArrowRightLeft className="w-5 h-5" />
+              Structure Converter
             </button>
+            <button
+              onClick={() => setActiveTool('dft-assistant')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-medium transition-all
+                ${activeTool === 'dft-assistant' 
+                  ? 'bg-white text-purple-600 shadow-md' 
+                  : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              <Brain className="w-5 h-5" />
+              DFT Setup Assistant
+            </button>
+          </div>
+        </div>
 
-            {/* Error Message */}
-            {error && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                <p className="text-red-700">{error}</p>
+        {activeTool === 'converter' && (
+          <div className="max-w-5xl mx-auto">
+            <div className="bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-purple-100 rounded-lg">
+                  <ArrowRightLeft className="w-8 h-8 text-purple-600" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-slate-900">Structure Format Converter</h3>
+                  <p className="text-slate-600">Upload QE output and get CIF, XYZ, POSCAR instantly</p>
+                </div>
               </div>
-            )}
 
-            {/* Results */}
-            {parsedData && conversionResults && (
-              <div className="mt-8">
-                {/* Tabs */}
-                <div className="flex border-b border-slate-200 mb-6">
-                  {(['structure', 'cif', 'xyz', 'poscar'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`px-6 py-3 font-medium transition-colors relative
-                        ${activeTab === tab 
-                          ? 'text-purple-600' 
-                          : 'text-slate-500 hover:text-slate-700'}`}
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6 flex gap-3">
+                <Sparkles className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-purple-800">
+                  <strong>Supported formats:</strong> Quantum ESPRESSO input (.in, .pw) and output (.out) files. 
+                  Extracts CELL_PARAMETERS and ATOMIC_POSITIONS blocks and converts to standard crystallographic formats.
+                </div>
+              </div>
+
+              <div
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
+                  ${file ? 'border-purple-400 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-purple-50'}`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileUpload}
+                  accept="*"
+                  className="hidden"
+                  title="Upload QE file"
+                  aria-label="Upload Quantum ESPRESSO file"
+                />
+                <div onClick={() => fileInputRef.current?.click()}>
+                  {file ? (
+                    <div className="flex items-center justify-center gap-3">
+                      <FileText className="w-8 h-8 text-purple-600" />
+                      <div>
+                        <p className="font-medium text-slate-900">{file.name}</p>
+                        <p className="text-sm text-slate-500">{(file.size / 1024).toFixed(1)} KB</p>
+                      </div>
+                      <CheckCircle className="w-6 h-6 text-green-500" />
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+                      <p className="text-slate-600 font-medium">Drop your QE file here or click to browse</p>
+                      <p className="text-sm text-slate-400 mt-2">Supports .in, .pw, .out files</p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={processFile}
+                disabled={!file || isProcessing}
+                className={`w-full mt-6 py-4 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all
+                  ${!file || isProcessing 
+                    ? 'bg-slate-300 cursor-not-allowed' 
+                    : 'bg-purple-600 hover:bg-purple-700 shadow-lg hover:shadow-xl'}`}
+              >
+                {isProcessing ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Atom className="w-5 h-5" />
+                    Parse & Convert
+                  </>
+                )}
+              </button>
+
+              {error && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-red-700">{error}</p>
+                </div>
+              )}
+
+              {parsedData && conversionResults && (
+                <div className="mt-8">
+                  <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
+                    {(['structure', 'cif', 'xyz', 'poscar'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`px-6 py-3 font-medium transition-colors relative whitespace-nowrap
+                          ${activeTab === tab 
+                            ? 'text-purple-600' 
+                            : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        {tab.toUpperCase()}
+                        {activeTab === tab && (
+                          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeTab === 'structure' && (
+                    <div className="space-y-6">
+                      <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-xl p-6 text-white">
+                        <div className="flex items-center gap-4">
+                          <div className="p-3 bg-white/20 rounded-lg">
+                            <Atom className="w-8 h-8" />
+                          </div>
+                          <div>
+                            <h4 className="text-2xl font-bold">{parsedData.formula}</h4>
+                            <p className="text-purple-100">{parsedData.numAtoms} atoms • {parsedData.elements.join(', ')}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl p-6">
+                        <h4 className="font-semibold text-slate-900 mb-4">Cell Parameters</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                          {[
+                            { label: 'a', value: parsedData.cellParams.a, unit: 'Å' },
+                            { label: 'b', value: parsedData.cellParams.b, unit: 'Å' },
+                            { label: 'c', value: parsedData.cellParams.c, unit: 'Å' },
+                            { label: 'α', value: parsedData.cellParams.alpha, unit: '°' },
+                            { label: 'β', value: parsedData.cellParams.beta, unit: '°' },
+                            { label: 'γ', value: parsedData.cellParams.gamma, unit: '°' },
+                          ].map(({ label, value, unit }) => (
+                            <div key={label} className="bg-white p-4 rounded-lg border border-slate-200">
+                              <p className="text-sm text-slate-500">{label}</p>
+                              <p className="text-lg font-mono font-semibold text-slate-900">
+                                {value.toFixed(4)} {unit}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl p-6">
+                        <h4 className="font-semibold text-slate-900 mb-4">Atomic Positions (Cartesian, Å)</h4>
+                        <div className="max-h-64 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-slate-200 sticky top-0">
+                              <tr>
+                                <th className="px-4 py-2 text-left">#</th>
+                                <th className="px-4 py-2 text-left">Element</th>
+                                <th className="px-4 py-2 text-right">X</th>
+                                <th className="px-4 py-2 text-right">Y</th>
+                                <th className="px-4 py-2 text-right">Z</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {parsedData.atoms.map((atom, i) => (
+                                <tr key={i} className="border-b border-slate-200 hover:bg-slate-100">
+                                  <td className="px-4 py-2 text-slate-500">{i + 1}</td>
+                                  <td className="px-4 py-2 font-medium">{atom.symbol}</td>
+                                  <td className="px-4 py-2 text-right font-mono">{atom.x.toFixed(6)}</td>
+                                  <td className="px-4 py-2 text-right font-mono">{atom.y.toFixed(6)}</td>
+                                  <td className="px-4 py-2 text-right font-mono">{atom.z.toFixed(6)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab !== 'structure' && conversionResults[activeTab] && (
+                    <div>
+                      <div className="flex gap-2 mb-4">
+                        <button
+                          onClick={() => downloadFile(conversionResults[activeTab]!, `${baseName}.${activeTab}`)}
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download {activeTab.toUpperCase()}
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(conversionResults[activeTab]!, activeTab)}
+                          className="flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+                        >
+                          {copiedFormat === activeTab ? (
+                            <>
+                              <Check className="w-4 h-4 text-green-600" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-4 h-4" />
+                              Copy
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="bg-slate-900 text-slate-100 p-6 rounded-xl overflow-x-auto text-sm font-mono max-h-96 overflow-y-auto">
+                        {conversionResults[activeTab]}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTool === 'dft-assistant' && (
+          <div className="max-w-5xl mx-auto">
+            <div className="bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg">
+                  <Brain className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-slate-900">DFT Setup Assistant</h3>
+                  <p className="text-slate-600">AI-powered parameter recommendations using Perplexity</p>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-4 mb-6 flex gap-3">
+                <Zap className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-purple-800">
+                  <strong>Powered by Perplexity AI:</strong> Get intelligent recommendations for k-points, cutoff energies, 
+                  pseudopotentials, convergence parameters, and element-specific settings based on your structure.
+                </div>
+              </div>
+
+              <div
+                onDrop={handleDftDrop}
+                onDragOver={(e) => e.preventDefault()}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all mb-6
+                  ${dftFile ? 'border-purple-400 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-purple-50'}`}
+              >
+                <input
+                  ref={dftFileInputRef}
+                  type="file"
+                  onChange={handleDftFileUpload}
+                  accept="*"
+                  className="hidden"
+                  title="Upload structure file"
+                  aria-label="Upload structure file for DFT"
+                />
+                <div onClick={() => dftFileInputRef.current?.click()}>
+                  {dftFile ? (
+                    <div className="flex items-center justify-center gap-3">
+                      <FileText className="w-8 h-8 text-purple-600" />
+                      <div>
+                        <p className="font-medium text-slate-900">{dftFile.name}</p>
+                        <p className="text-sm text-slate-500">
+                          {dftParsedData ? `${dftParsedData.formula} • ${dftParsedData.numAtoms} atoms` : 'Parsing...'}
+                        </p>
+                      </div>
+                      <CheckCircle className="w-6 h-6 text-green-500" />
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+                      <p className="text-slate-600 font-medium">Upload structure file (.in, .pw, .out)</p>
+                      <p className="text-sm text-slate-400 mt-2">Drag & drop or click to browse</p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    <Settings className="w-4 h-4 inline mr-1" />
+                    Calculation Type
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={calcType}
+                      onChange={(e) => setCalcType(e.target.value)}
+                      className="w-full p-3 border border-slate-300 rounded-lg appearance-none bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                     >
-                      {tab.toUpperCase()}
-                      {activeTab === tab && (
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />
-                      )}
-                    </button>
-                  ))}
+                      <option value="scf">SCF (Self-Consistent Field)</option>
+                      <option value="relax">Relax (Atomic Positions)</option>
+                      <option value="vc-relax">VC-Relax (Variable Cell)</option>
+                      <option value="bands">Bands (Band Structure)</option>
+                      <option value="nscf">NSCF (Non-SCF)</option>
+                      <option value="dos">DOS (Density of States)</option>
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                  </div>
                 </div>
 
-                {/* Tab Content */}
-                {activeTab === 'structure' && (
-                  <div className="space-y-6">
-                    {/* Summary Card */}
-                    <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-xl p-6 text-white">
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-white/20 rounded-lg">
-                          <Atom className="w-8 h-8" />
-                        </div>
-                        <div>
-                          <h4 className="text-2xl font-bold">{parsedData.formula}</h4>
-                          <p className="text-purple-100">{parsedData.numAtoms} atoms</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Cell Parameters */}
-                    <div className="bg-slate-50 rounded-xl p-6">
-                      <h4 className="font-semibold text-slate-900 mb-4">Cell Parameters</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        <div className="bg-white p-4 rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-500">a</p>
-                          <p className="text-lg font-mono font-semibold text-slate-900">
-                            {parsedData.cellParams.a.toFixed(4)} Å
-                          </p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-500">b</p>
-                          <p className="text-lg font-mono font-semibold text-slate-900">
-                            {parsedData.cellParams.b.toFixed(4)} Å
-                          </p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-500">c</p>
-                          <p className="text-lg font-mono font-semibold text-slate-900">
-                            {parsedData.cellParams.c.toFixed(4)} Å
-                          </p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-500">α</p>
-                          <p className="text-lg font-mono font-semibold text-slate-900">
-                            {parsedData.cellParams.alpha.toFixed(2)}°
-                          </p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-500">β</p>
-                          <p className="text-lg font-mono font-semibold text-slate-900">
-                            {parsedData.cellParams.beta.toFixed(2)}°
-                          </p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg border border-slate-200">
-                          <p className="text-sm text-slate-500">γ</p>
-                          <p className="text-lg font-mono font-semibold text-slate-900">
-                            {parsedData.cellParams.gamma.toFixed(2)}°
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Atomic Positions */}
-                    <div className="bg-slate-50 rounded-xl p-6">
-                      <h4 className="font-semibold text-slate-900 mb-4">Atomic Positions (Cartesian, Å)</h4>
-                      <div className="max-h-64 overflow-y-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-slate-200 sticky top-0">
-                            <tr>
-                              <th className="px-4 py-2 text-left">#</th>
-                              <th className="px-4 py-2 text-left">Element</th>
-                              <th className="px-4 py-2 text-right">X</th>
-                              <th className="px-4 py-2 text-right">Y</th>
-                              <th className="px-4 py-2 text-right">Z</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {parsedData.atoms.map((atom, i) => (
-                              <tr key={i} className="border-b border-slate-200 hover:bg-slate-100">
-                                <td className="px-4 py-2 text-slate-500">{i + 1}</td>
-                                <td className="px-4 py-2 font-medium">{atom.symbol}</td>
-                                <td className="px-4 py-2 text-right font-mono">{atom.x.toFixed(6)}</td>
-                                <td className="px-4 py-2 text-right font-mono">{atom.y.toFixed(6)}</td>
-                                <td className="px-4 py-2 text-right font-mono">{atom.z.toFixed(6)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    <Atom className="w-4 h-4 inline mr-1" />
+                    XC Functional
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={functional}
+                      onChange={(e) => setFunctional(e.target.value)}
+                      className="w-full p-3 border border-slate-300 rounded-lg appearance-none bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    >
+                      <option value="PBE">PBE</option>
+                      <option value="PBEsol">PBEsol</option>
+                      <option value="LDA">LDA</option>
+                      <option value="SCAN">SCAN</option>
+                      <option value="r2SCAN">r2SCAN</option>
+                      <option value="HSE">HSE (Hybrid)</option>
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                   </div>
-                )}
+                </div>
+              </div>
 
-                {activeTab !== 'structure' && conversionResults[activeTab] && (
-                  <div>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Perplexity API Key
+                </label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="pplx-..."
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Get your API key from <a href="https://www.perplexity.ai/settings/api" target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">perplexity.ai/settings/api</a>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 mb-6">
+                <input
+                  type="checkbox"
+                  id="generateTemplate"
+                  checked={generateTemplate}
+                  onChange={(e) => setGenerateTemplate(e.target.checked)}
+                  className="w-4 h-4 text-purple-600 border-slate-300 rounded focus:ring-purple-500"
+                />
+                <label htmlFor="generateTemplate" className="text-sm text-slate-700">
+                  Also generate QE input template
+                </label>
+              </div>
+
+              <button
+                onClick={getDftAdvice}
+                disabled={!dftFile || isDftProcessing || !apiKey}
+                className={`w-full py-4 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all
+                  ${!dftFile || isDftProcessing || !apiKey
+                    ? 'bg-slate-300 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-lg hover:shadow-xl'}`}
+              >
+                {isDftProcessing ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Getting AI Recommendations...
+                  </>
+                ) : (
+                  <>
+                    <Brain className="w-5 h-5" />
+                    Get DFT Recommendations
+                  </>
+                )}
+              </button>
+              
+              {!apiKey && dftFile && (
+                <p className="text-sm text-amber-600 mt-2 text-center">
+                  ⚠️ Please enter your Perplexity API key to get recommendations
+                </p>
+              )}
+
+              {dftError && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-red-700">{dftError}</p>
+                </div>
+              )}
+
+              {dftAdvice && (
+                <div className="mt-8 space-y-6">
+                  <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-xl p-4 text-white flex items-center gap-3">
+                    <Brain className="w-6 h-6" />
+                    <h4 className="text-lg font-semibold">AI-Generated DFT Recommendations</h4>
+                  </div>
+                  
+                  <div className="bg-slate-50 rounded-xl p-6">
                     <div className="flex gap-2 mb-4">
                       <button
-                        onClick={() => downloadFile(conversionResults[activeTab]!, `${baseName}.${activeTab}`)}
+                        onClick={() => downloadFile(dftAdvice, `${dftBaseName}_dft_advice.md`)}
                         className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                       >
                         <Download className="w-4 h-4" />
-                        Download {activeTab.toUpperCase()}
+                        Download Advice
                       </button>
                       <button
-                        onClick={() => copyToClipboard(conversionResults[activeTab]!, activeTab)}
+                        onClick={() => copyToClipboard(dftAdvice, 'advice')}
                         className="flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
                       >
-                        {copiedFormat === activeTab ? (
+                        {copiedFormat === 'advice' ? (
                           <>
                             <Check className="w-4 h-4 text-green-600" />
                             Copied!
@@ -545,15 +988,53 @@ const QEParser: React.FC = () => {
                         )}
                       </button>
                     </div>
-                    <pre className="bg-slate-900 text-slate-100 p-6 rounded-xl overflow-x-auto text-sm font-mono max-h-96 overflow-y-auto">
-                      {conversionResults[activeTab]}
+                    <pre className="whitespace-pre-wrap text-sm bg-white p-4 rounded-lg border border-slate-200 max-h-96 overflow-y-auto">
+                      {dftAdvice}
                     </pre>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+
+              {qeTemplate && (
+                <div className="mt-6">
+                  <div className="bg-slate-800 text-white rounded-xl p-4 flex items-center gap-3 mb-4">
+                    <FileText className="w-6 h-6" />
+                    <h4 className="text-lg font-semibold">Generated QE Input Template</h4>
+                  </div>
+                  
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => downloadFile(qeTemplate, `${dftBaseName}_${calcType}.in`)}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download .in File
+                    </button>
+                    <button
+                      onClick={() => copyToClipboard(qeTemplate, 'template')}
+                      className="flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+                    >
+                      {copiedFormat === 'template' ? (
+                        <>
+                          <Check className="w-4 h-4 text-green-600" />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          Copy
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <pre className="bg-slate-900 text-slate-100 p-6 rounded-xl overflow-x-auto text-sm font-mono max-h-96 overflow-y-auto">
+                    {qeTemplate}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </section>
   );
