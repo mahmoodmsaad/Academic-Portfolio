@@ -605,6 +605,7 @@ Please provide specific recommendations for:
               <div
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
                 className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
                   ${file ? 'border-purple-400 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-purple-50'}`}
               >
@@ -617,7 +618,7 @@ Please provide specific recommendations for:
                   title="Upload QE file"
                   aria-label="Upload Quantum ESPRESSO file"
                 />
-                <div onClick={() => fileInputRef.current?.click()}>
+                <div>
                   {file ? (
                     <div className="flex items-center justify-center gap-3">
                       <FileText className="w-8 h-8 text-purple-600" />
@@ -812,6 +813,7 @@ Please provide specific recommendations for:
               <div
                 onDrop={handleDftDrop}
                 onDragOver={(e) => e.preventDefault()}
+                onClick={() => dftFileInputRef.current?.click()}
                 className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all mb-6
                   ${dftFile ? 'border-purple-400 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-purple-50'}`}
               >
@@ -824,7 +826,7 @@ Please provide specific recommendations for:
                   title="Upload structure file"
                   aria-label="Upload structure file for DFT"
                 />
-                <div onClick={() => dftFileInputRef.current?.click()}>
+                <div>
                   {dftFile ? (
                     <div className="flex items-center justify-center gap-3">
                       <FileText className="w-8 h-8 text-purple-600" />
@@ -856,6 +858,7 @@ Please provide specific recommendations for:
                     <select
                       value={calcType}
                       onChange={(e) => setCalcType(e.target.value)}
+                      title="Select calculation type"
                       className="w-full p-3 border border-slate-300 rounded-lg appearance-none bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                     >
                       <option value="scf">SCF (Self-Consistent Field)</option>
@@ -878,6 +881,7 @@ Please provide specific recommendations for:
                     <select
                       value={functional}
                       onChange={(e) => setFunctional(e.target.value)}
+                      title="Select XC functional"
                       className="w-full p-3 border border-slate-300 rounded-lg appearance-none bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                     >
                       <option value="PBE">PBE</option>
