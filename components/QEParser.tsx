@@ -344,7 +344,6 @@ const QEParser: React.FC = () => {
             <div
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
-              onClick={() => fileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
                 ${file ? 'border-purple-400 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-purple-50'}`}
             >
@@ -352,9 +351,12 @@ const QEParser: React.FC = () => {
                 ref={fileInputRef}
                 type="file"
                 onChange={handleFileUpload}
-                accept=".in,.pw,.out,.txt"
+                accept="*"
                 className="hidden"
+                title="Upload QE file"
+                aria-label="Upload Quantum ESPRESSO file"
               />
+              <div onClick={() => fileInputRef.current?.click()}>
               {file ? (
                 <div className="flex items-center justify-center gap-3">
                   <FileText className="w-8 h-8 text-purple-600" />
@@ -371,6 +373,7 @@ const QEParser: React.FC = () => {
                   <p className="text-sm text-slate-400 mt-2">Supports .in, .pw, .out files</p>
                 </>
               )}
+              </div>
             </div>
 
             {/* Parse Button */}
