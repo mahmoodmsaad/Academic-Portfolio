@@ -837,7 +837,7 @@ Please provide specific recommendations for:
 6. **Additional tips**: Element-specific considerations (DFT+U, SOC, vdW corrections).`;
 
       // Call Lambda backend (API keys are stored securely on server)
-      const response = await fetch('https://krxlnhgu6e.execute-api.us-east-1.amazonaws.com/dft-advice', {
+      const response = await fetch('https://b0q9fbz7nl.execute-api.us-east-1.amazonaws.com/prod/dft-advice', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
