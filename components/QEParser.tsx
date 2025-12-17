@@ -50,7 +50,7 @@ const QEParser: React.FC = () => {
   const [dftParsedData, setDftParsedData] = useState<ParsedStructure | null>(null);
   const [calcType, setCalcType] = useState<string>('scf');
   const [functional, setFunctional] = useState<string>('PBE');
-  const [apiKey, setApiKey] = useState<string>('');
+  const [aiProvider, setAiProvider] = useState<'perplexity' | 'deepseek'>('perplexity');
   const [dftAdvice, setDftAdvice] = useState<string>('');
   const [qeTemplate, setQeTemplate] = useState<string>('');
   const [isDftProcessing, setIsDftProcessing] = useState(false);
@@ -836,37 +836,25 @@ Please provide specific recommendations for:
 5. **Smearing**: Recommend smearing type and degauss value based on material type.
 6. **Additional tips**: Element-specific considerations (DFT+U, SOC, vdW corrections).`;
 
-      const effectiveApiKey = apiKey;
-
-      const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      // Call Lambda backend (API keys are stored securely on server)
+      const response = await fetch('https://krxlnhgu6e.execute-api.us-east-1.amazonaws.com/dft-advice', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${effectiveApiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'sonar',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert in Density Functional Theory (DFT) calculations using Quantum ESPRESSO. Provide detailed, practical recommendations for setting up calculations. Be specific with numerical values.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.2,
-          max_tokens: 2000,
+          prompt: prompt,
+          provider: aiProvider
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `API request failed: ${response.status}`);
       }
 
       const data = await response.json();
-      setDftAdvice(data.choices[0].message.content);
+      setDftAdvice(data.content);
 
       if (generateTemplate) {
         setQeTemplate(generateQEInputTemplate(structureData));
@@ -1253,17 +1241,32 @@ Please provide specific recommendations for:
 
               <div className="mb-6">
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Perplexity API Key
+                  AI Provider
                 </label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="pplx-..."
-                  className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Get your API key from <a href="https://www.perplexity.ai/settings/api" target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">perplexity.ai/settings/api</a>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setAiProvider('perplexity')}
+                    className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2
+                      ${aiProvider === 'perplexity'
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Perplexity AI
+                  </button>
+                  <button
+                    onClick={() => setAiProvider('deepseek')}
+                    className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2
+                      ${aiProvider === 'deepseek'
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    <Brain className="w-4 h-4" />
+                    DeepSeek
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-2 text-center">
+                  Choose your preferred AI model for DFT recommendations
                 </p>
               </div>
 
@@ -1282,16 +1285,16 @@ Please provide specific recommendations for:
 
               <button
                 onClick={getDftAdvice}
-                disabled={!dftFile || !dftParsedData || isDftProcessing || !apiKey}
+                disabled={!dftFile || !dftParsedData || isDftProcessing}
                 className={`w-full py-4 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all
-                  ${!dftFile || !dftParsedData || isDftProcessing || !apiKey
+                  ${!dftFile || !dftParsedData || isDftProcessing
                     ? 'bg-slate-300 cursor-not-allowed' 
                     : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-lg hover:shadow-xl'}`}
               >
                 {isDftProcessing ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Getting AI Recommendations...
+                    Getting {aiProvider === 'deepseek' ? 'DeepSeek' : 'Perplexity'} Recommendations...
                   </>
                 ) : (
                   <>
@@ -1300,12 +1303,6 @@ Please provide specific recommendations for:
                   </>
                 )}
               </button>
-              
-              {!apiKey && dftFile && (
-                <p className="text-sm text-amber-600 mt-2 text-center">
-                  ⚠️ Please enter your Perplexity API key to get recommendations
-                </p>
-              )}
 
               {dftError && (
                 <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
