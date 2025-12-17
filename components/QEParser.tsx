@@ -667,16 +667,60 @@ const QEParser: React.FC = () => {
   };
 
   const generateQEInputTemplate = (data: ParsedStructure): string => {
-    const { formula, atoms, cellVectors, elements, numAtoms } = data;
+    const { formula, atoms, cellVectors, elements, numAtoms, cellParams } = data;
     
+    // Extended atomic masses including heavier elements
     const atomicMasses: {[key: string]: number} = {
       'H': 1.008, 'He': 4.003, 'Li': 6.941, 'Be': 9.012, 'B': 10.81, 'C': 12.01,
       'N': 14.01, 'O': 16.00, 'F': 19.00, 'Ne': 20.18, 'Na': 22.99, 'Mg': 24.31,
       'Al': 26.98, 'Si': 28.09, 'P': 30.97, 'S': 32.07, 'Cl': 35.45, 'Ar': 39.95,
       'K': 39.10, 'Ca': 40.08, 'Sc': 44.96, 'Ti': 47.87, 'V': 50.94, 'Cr': 52.00,
       'Mn': 54.94, 'Fe': 55.85, 'Co': 58.93, 'Ni': 58.69, 'Cu': 63.55, 'Zn': 65.38,
-      'Ga': 69.72, 'Ge': 72.63, 'As': 74.92, 'Se': 78.97, 'Br': 79.90, 'Kr': 83.80
+      'Ga': 69.72, 'Ge': 72.63, 'As': 74.92, 'Se': 78.97, 'Br': 79.90, 'Kr': 83.80,
+      'Rb': 85.47, 'Sr': 87.62, 'Y': 88.91, 'Zr': 91.22, 'Nb': 92.91, 'Mo': 95.94,
+      'Tc': 98.00, 'Ru': 101.1, 'Rh': 102.9, 'Pd': 106.4, 'Ag': 107.9, 'Cd': 112.4,
+      'In': 114.8, 'Sn': 118.7, 'Sb': 121.8, 'Te': 127.6, 'I': 126.9, 'Xe': 131.3,
+      'Cs': 132.9, 'Ba': 137.3, 'La': 138.9, 'Ce': 140.1, 'Hf': 178.5, 'Ta': 180.9,
+      'W': 183.8, 'Re': 186.2, 'Os': 190.2, 'Ir': 192.2, 'Pt': 195.1, 'Au': 197.0,
+      'Hg': 200.6, 'Tl': 204.4, 'Pb': 207.2, 'Bi': 209.0
     };
+    
+    // Heavy elements that need higher cutoffs and may need SOC
+    const heavyElements = ['Pt', 'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'W', 'Re', 'Os', 'Ir', 'Ta', 'Hf'];
+    const transitionMetals = ['Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+      'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd',
+      'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au'];
+    
+    // Detect if it's a 2D system (one axis much larger than others)
+    const { a, b, c } = cellParams;
+    const maxAxis = Math.max(a, b, c);
+    const minAxis = Math.min(a, b, c);
+    const is2D = maxAxis / minAxis > 3; // If one axis is 3x larger, likely 2D/slab
+    
+    // Determine which axis is vacuum (for 2D systems)
+    let kx = 4, ky = 4, kz = 4;
+    if (is2D) {
+      if (c === maxAxis) { kz = 1; kx = 6; ky = 6; }
+      else if (b === maxAxis) { ky = 1; kx = 6; kz = 6; }
+      else { kx = 1; ky = 6; kz = 6; }
+    }
+    
+    // Check for heavy elements
+    const hasHeavyElements = elements.some(el => heavyElements.includes(el));
+    const hasTransitionMetals = elements.some(el => transitionMetals.includes(el));
+    const isMetallic = hasTransitionMetals || hasHeavyElements;
+    
+    // Set cutoffs based on elements
+    let ecutwfc = 60;
+    let ecutrho = 480;
+    if (hasHeavyElements) {
+      ecutwfc = 70;
+      ecutrho = 560;
+    }
+    
+    // Set smearing based on system type
+    const smearing = isMetallic ? 'mv' : 'gaussian';
+    const mixingBeta = hasHeavyElements ? 0.3 : 0.7;
     
     const lines: string[] = [];
     
@@ -696,16 +740,21 @@ const QEParser: React.FC = () => {
     lines.push('  ibrav = 0');
     lines.push(`  nat = ${numAtoms}`);
     lines.push(`  ntyp = ${elements.length}`);
-    lines.push('  ecutwfc = 60.0');
-    lines.push('  ecutrho = 480.0');
+    lines.push(`  ecutwfc = ${ecutwfc}.0`);
+    lines.push(`  ecutrho = ${ecutrho}.0`);
     lines.push("  occupations = 'smearing'");
-    lines.push("  smearing = 'gaussian'");
+    lines.push(`  smearing = '${smearing}'`);
     lines.push('  degauss = 0.01');
+    if (hasHeavyElements) {
+      lines.push('  ! For heavy elements, consider adding:');
+      lines.push('  ! lspinorb = .true.');
+      lines.push('  ! noncolin = .true.');
+    }
     lines.push('/\n');
     
     lines.push('&ELECTRONS');
     lines.push('  conv_thr = 1.0d-8');
-    lines.push('  mixing_beta = 0.7');
+    lines.push(`  mixing_beta = ${mixingBeta}`);
     lines.push('/\n');
     
     if (calcType === 'relax' || calcType === 'vc-relax') {
@@ -744,7 +793,7 @@ const QEParser: React.FC = () => {
     lines.push('');
     
     lines.push('K_POINTS automatic');
-    lines.push('  4 4 4 0 0 0');
+    lines.push(`  ${kx} ${ky} ${kz} 0 0 0`);
     
     return lines.join('\n');
   };
