@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Calculator, Download, Info, ChevronRight, ChevronLeft,
-  CheckCircle, AlertCircle, Upload, Play, Square, RotateCcw, Atom,
+  CheckCircle, AlertCircle, Upload, Play, Square, RotateCcw, Atom, Loader2,
 } from 'lucide-react';
 import { METALS, MONOLAYER_PRESETS, getMetalBySymbol, getMonolayerByName } from '../utils/monolayerDatabase';
 import { computeSurfaceTargets } from '../utils/surfaceCalculator';
@@ -10,6 +10,9 @@ import type {
   WizardStep, SurfaceCellParams, MonolayerMaterial,
   TargetResults, WorkerOutMessage, WorkerProgressMessage,
 } from '../utils/matrixOptimizerTypes';
+
+// ASE Lambda API endpoint - set in .env as VITE_SURFACE_API
+const SURFACE_API_URL = import.meta.env.VITE_SURFACE_API as string | undefined;
 
 // === Tier badge colors ===
 const TIER_STYLES: Record<string, string> = {
@@ -40,12 +43,17 @@ const MatrixOptimizer: React.FC = () => {
   const [step, setStep] = useState<WizardStep>('surface');
 
   // === Step 1: Surface target ===
+  const [elementMode, setElementMode] = useState<'preset' | 'custom'>('preset');
   const [selectedMetal, setSelectedMetal] = useState('Pt');
+  const [customElement, setCustomElement] = useState('');
   const [millerH, setMillerH] = useState(1);
   const [millerK, setMillerK] = useState(1);
   const [millerL, setMillerL] = useState(1);
   const [surfaceTargets, setSurfaceTargets] = useState<SurfaceCellParams[] | null>(null);
   const [surfaceError, setSurfaceError] = useState('');
+  const [isComputingTargets, setIsComputingTargets] = useState(false);
+  const [targetMethod, setTargetMethod] = useState<'ase' | 'analytical' | null>(null);
+  const [bulkInfo, setBulkInfo] = useState<Record<string, unknown> | null>(null);
 
   // === Step 2: Monolayer ===
   const [monolayerMode, setMonolayerMode] = useState<'preset' | 'custom' | 'cif'>('preset');
@@ -75,18 +83,66 @@ const MatrixOptimizer: React.FC = () => {
     };
   }, []);
 
-  // === Step 1: Compute surface targets ===
-  const computeTargets = () => {
+  // === Step 1: Compute surface targets (ASE Lambda first, then JS fallback) ===
+  const computeTargets = async () => {
     setSurfaceError('');
     setSurfaceTargets(null);
+    setTargetMethod(null);
+    setBulkInfo(null);
+    setIsComputingTargets(true);
+
+    const element = elementMode === 'custom' ? customElement.trim() : selectedMetal;
+    if (!element) {
+      setSurfaceError('Please enter an element symbol.');
+      setIsComputingTargets(false);
+      return;
+    }
+    if (millerH === 0 && millerK === 0 && millerL === 0) {
+      setSurfaceError('Miller indices cannot all be zero.');
+      setIsComputingTargets(false);
+      return;
+    }
+
+    // Try ASE Lambda API first
+    if (SURFACE_API_URL) {
+      try {
+        const response = await fetch(SURFACE_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ element, h: millerH, k: millerK, l: millerL }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success && data.targets) {
+          setSurfaceTargets(data.targets);
+          setTargetMethod('ase');
+          if (data.bulk_info) setBulkInfo(data.bulk_info);
+          setIsComputingTargets(false);
+          return;
+        }
+        throw new Error(data.error || 'Invalid API response');
+      } catch (err) {
+        // API failed — fall through to JS fallback
+        console.warn('ASE API unavailable, using analytical fallback:', err);
+      }
+    }
+
+    // Fallback: JS analytical surface calculator
     try {
-      const metal = getMetalBySymbol(selectedMetal);
-      if (!metal) throw new Error('Metal not found');
+      const metal = getMetalBySymbol(element);
+      if (!metal) throw new Error(`Element "${element}" not in preset database. Deploy the ASE Lambda for full element support.`);
       const targets = computeSurfaceTargets(metal, millerH, millerK, millerL);
       setSurfaceTargets(targets);
+      setTargetMethod('analytical');
     } catch (err) {
       setSurfaceError(err instanceof Error ? err.message : 'Failed to compute surface cell');
     }
+    setIsComputingTargets(false);
   };
 
   // === Step 2: Set monolayer and start optimization ===
@@ -205,13 +261,15 @@ const MatrixOptimizer: React.FC = () => {
   }, [progress]);
 
   // === Download results ===
+  const activeElement = elementMode === 'custom' ? customElement.trim() : selectedMetal;
+
   const downloadResults = () => {
     if (!results) return;
-    const metal = getMetalBySymbol(selectedMetal);
     let text = `Universal Matrix Optimizer Results\n`;
     text += `${'='.repeat(60)}\n`;
-    text += `Metal: ${metal?.name} (${selectedMetal})\n`;
+    text += `Element: ${activeElement}\n`;
     text += `Surface: (${millerH}${millerK}${millerL})\n`;
+    text += `Target method: ${targetMethod === 'ase' ? 'ASE (Atomic Simulation Environment)' : 'Analytical'}\n`;
     text += `Monolayer: ${monolayer?.name} (a=${monolayer?.a}, b=${monolayer?.b}, gamma=${monolayer?.gamma})\n`;
     text += `Date: ${new Date().toISOString()}\n\n`;
 
@@ -237,7 +295,7 @@ const MatrixOptimizer: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `matrix_optimizer_${selectedMetal}_${millerH}${millerK}${millerL}_${monolayer?.name || 'custom'}.txt`;
+    a.download = `matrix_optimizer_${activeElement}_${millerH}${millerK}${millerL}_${monolayer?.name || 'custom'}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -317,33 +375,64 @@ const MatrixOptimizer: React.FC = () => {
               <div className="space-y-6">
                 <h4 className="text-lg font-bold text-slate-900">Define Surface Target</h4>
 
-                {/* Metal Selection */}
+                {/* Element Selection Mode */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2" htmlFor="metal-select">
-                    Metal Element
-                  </label>
-                  <select
-                    id="metal-select"
-                    value={selectedMetal}
-                    onChange={(e) => { setSelectedMetal(e.target.value); setSurfaceTargets(null); }}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 focus:border-academic-500 bg-white"
-                  >
-                    <optgroup label="FCC Metals">
-                      {METALS.filter(m => m.structure === 'FCC').map(m => (
-                        <option key={m.symbol} value={m.symbol}>{m.symbol} - {m.name} (a0={m.a0} A)</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="BCC Metals">
-                      {METALS.filter(m => m.structure === 'BCC').map(m => (
-                        <option key={m.symbol} value={m.symbol}>{m.symbol} - {m.name} (a0={m.a0} A)</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="HCP Metals">
-                      {METALS.filter(m => m.structure === 'HCP').map(m => (
-                        <option key={m.symbol} value={m.symbol}>{m.symbol} - {m.name} (a0={m.a0} A)</option>
-                      ))}
-                    </optgroup>
-                  </select>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Element</label>
+                  <div className="flex gap-2 mb-3">
+                    {([['preset', 'Common Metals'], ['custom', 'Any Element (ASE)']] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        onClick={() => { setElementMode(mode); setSurfaceTargets(null); }}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          elementMode === mode
+                            ? 'bg-academic-600 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {elementMode === 'preset' ? (
+                    <select
+                      id="metal-select"
+                      aria-label="Metal element"
+                      value={selectedMetal}
+                      onChange={(e) => { setSelectedMetal(e.target.value); setSurfaceTargets(null); }}
+                      className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 focus:border-academic-500 bg-white"
+                    >
+                      <optgroup label="FCC Metals">
+                        {METALS.filter(m => m.structure === 'FCC').map(m => (
+                          <option key={m.symbol} value={m.symbol}>{m.symbol} - {m.name} (a0={m.a0} A)</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="BCC Metals">
+                        {METALS.filter(m => m.structure === 'BCC').map(m => (
+                          <option key={m.symbol} value={m.symbol}>{m.symbol} - {m.name} (a0={m.a0} A)</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="HCP Metals">
+                        {METALS.filter(m => m.structure === 'HCP').map(m => (
+                          <option key={m.symbol} value={m.symbol}>{m.symbol} - {m.name} (a0={m.a0} A)</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  ) : (
+                    <div>
+                      <input
+                        id="custom-element"
+                        type="text"
+                        value={customElement}
+                        onChange={(e) => { setCustomElement(e.target.value); setSurfaceTargets(null); }}
+                        placeholder="e.g. Pt, Cu, Au, Si, Ge..."
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 focus:border-academic-500"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        ASE supports all elements. Lattice parameters are fetched automatically.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Miller Indices */}
@@ -375,10 +464,20 @@ const MatrixOptimizer: React.FC = () => {
                 {/* Compute Button */}
                 <button
                   onClick={computeTargets}
-                  className="w-full bg-academic-600 text-white py-3 rounded-lg font-semibold hover:bg-academic-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-academic-600/30"
+                  disabled={isComputingTargets}
+                  className="w-full bg-academic-600 text-white py-3 rounded-lg font-semibold hover:bg-academic-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-academic-600/30 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Calculator className="w-5 h-5" />
-                  Compute Surface Cell Parameters
+                  {isComputingTargets ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Computing via ASE...
+                    </>
+                  ) : (
+                    <>
+                      <Calculator className="w-5 h-5" />
+                      Compute Surface Cell Parameters
+                    </>
+                  )}
                 </button>
 
                 {/* Error */}
@@ -392,9 +491,25 @@ const MatrixOptimizer: React.FC = () => {
                 {/* Targets Table */}
                 {surfaceTargets && (
                   <div className="space-y-4">
-                    <h5 className="text-sm font-semibold text-slate-700">
-                      {selectedMetal}({millerH}{millerK}{millerL}) Surface Cell Targets:
-                    </h5>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h5 className="text-sm font-semibold text-slate-700">
+                        {elementMode === 'custom' ? customElement : selectedMetal}({millerH}{millerK}{millerL}) Surface Cell Targets:
+                      </h5>
+                      {targetMethod && (
+                        <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${
+                          targetMethod === 'ase'
+                            ? 'bg-green-100 text-green-800 border-green-300'
+                            : 'bg-amber-100 text-amber-800 border-amber-300'
+                        }`}>
+                          {targetMethod === 'ase' ? 'ASE (Python)' : 'Analytical (JS fallback)'}
+                        </span>
+                      )}
+                    </div>
+                    {bulkInfo && (
+                      <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
+                        Bulk: a={String(bulkInfo.lattice_a)} A, b={String(bulkInfo.lattice_b)} A, c={String(bulkInfo.lattice_c)} A
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
@@ -661,7 +776,7 @@ const MatrixOptimizer: React.FC = () => {
                 {progress && (
                   <div className="bg-academic-50 border border-academic-200 rounded-lg p-3 text-sm text-academic-800">
                     Tested <strong>{progress.matrices_tested.toLocaleString()}</strong> matrices in{' '}
-                    <strong>{(progress.elapsed_ms / 1000).toFixed(1)}s</strong> | Monolayer: <strong>{monolayer?.name}</strong> | Surface: <strong>{selectedMetal}({millerH}{millerK}{millerL})</strong>
+                    <strong>{(progress.elapsed_ms / 1000).toFixed(1)}s</strong> | Monolayer: <strong>{monolayer?.name}</strong> | Surface: <strong>{activeElement}({millerH}{millerK}{millerL})</strong>
                   </div>
                 )}
 

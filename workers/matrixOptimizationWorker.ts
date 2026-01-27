@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { computeSupercellParams, scoreMatrix, classifyTier } from '../utils/matrixMath';
+import { classifyTier } from '../utils/matrixMath';
 import type {
   WorkerInMessage,
   WorkerProgressMessage,
@@ -41,8 +41,9 @@ function runOptimization(config: {
   duration_ms: number;
   scan_limit: number;
 }) {
-  const { targets, monolayer, duration_ms, scan_limit } = config;
+  const { targets, monolayer, duration_ms } = config;
   const startTime = performance.now();
+  const endTime = startTime + duration_ms;
   let totalTested = 0;
 
   // Per-target result storage (keep top 50 rolling)
@@ -51,26 +52,37 @@ function runOptimization(config: {
     bestResults.set(t.label, []);
   }
 
-  // Pre-compute target areas for determinant filtering
+  // Pre-compute monolayer constants
+  const gammaRad = monolayer.gamma * Math.PI / 180;
+  const baseCosG = Math.cos(gammaRad);
+  const baseSinG = Math.sin(gammaRad);
+  const monoA = monolayer.a;
+  const monoB = monolayer.b;
+  const monoArea = monoA * monoB * Math.abs(baseSinG);
+
+  // Pre-compute target metadata for determinant filtering
   const targetMeta = targets.map(t => {
-    const monoArea = monolayer.a * monolayer.b * Math.sin(monolayer.gamma * Math.PI / 180);
     const expectedDet = Math.round(t.area / monoArea);
     return {
       target: t,
-      minDet: Math.max(1, Math.floor(expectedDet * 0.3)),
-      maxDet: Math.ceil(expectedDet * 2.0) + 10,
+      // Allow wide determinant range to catch more results
+      minDet: Math.max(1, Math.floor(expectedDet * 0.2)),
+      maxDet: Math.ceil(expectedDet * 3.0) + 20,
     };
   });
 
   let lastProgressTime = startTime;
+  let progressCounter = 0;
 
-  function postProgress(phase: string) {
+  function postProgress(phase: string, force = false) {
+    progressCounter++;
+    if (!force && progressCounter % 50 !== 0) return;
     const now = performance.now();
-    if (now - lastProgressTime < 2000) return;
+    if (!force && now - lastProgressTime < 1500) return;
     lastProgressTime = now;
 
     const elapsed = now - startTime;
-    const pct = Math.min(100, (elapsed / duration_ms) * 100);
+    const pct = Math.min(99.9, (elapsed / duration_ms) * 100);
 
     const results: TargetResults[] = targets.map(t => ({
       target: t,
@@ -90,27 +102,43 @@ function runOptimization(config: {
 
     totalTested++;
 
-    // Compute supercell parameters once
-    const { a_super, b_super, gamma_super } = computeSupercellParams(
-      monolayer.a, monolayer.b, monolayer.gamma, n, m, k, l
-    );
+    // Compute supercell parameters using 2D vector math inline for speed
+    const sx1 = n * monoA + m * monoB * baseCosG;
+    const sy1 = m * monoB * baseSinG;
+    const sx2 = k * monoA + l * monoB * baseCosG;
+    const sy2 = l * monoB * baseSinG;
 
-    if (isNaN(a_super) || isNaN(b_super) || isNaN(gamma_super)) return;
+    const a_super = Math.sqrt(sx1 * sx1 + sy1 * sy1);
+    const b_super = Math.sqrt(sx2 * sx2 + sy2 * sy2);
+
+    if (a_super < 0.01 || b_super < 0.01) return;
+
+    const dot2d = sx1 * sx2 + sy1 * sy2;
+    const cosGamma = dot2d / (a_super * b_super);
+    const gamma_super = Math.acos(Math.max(-1, Math.min(1, cosGamma))) * (180 / Math.PI);
+
+    if (isNaN(gamma_super)) return;
 
     const atomCount = absDet * monolayer.atoms_per_cell;
 
     for (const meta of targetMeta) {
-      // Quick determinant filter
+      // Determinant filter
       if (absDet < meta.minDet || absDet > meta.maxDet) continue;
 
-      const { score, error_a_pct, error_b_pct, error_gamma_pct } = scoreMatrix(
-        a_super, b_super, gamma_super,
-        meta.target.a, meta.target.b, meta.target.gamma,
-        atomCount
-      );
+      const error_a_pct = Math.abs(a_super - meta.target.a) / meta.target.a * 100;
+      const error_b_pct = Math.abs(b_super - meta.target.b) / meta.target.b * 100;
+      const error_gamma_pct = Math.abs(gamma_super - meta.target.gamma) / meta.target.gamma * 100;
 
       // Only keep results with max individual error < 10%
       if (Math.max(error_a_pct, error_b_pct, error_gamma_pct) >= 10) continue;
+
+      // Penalty for exceeding thresholds
+      let penalty = 0;
+      if (error_a_pct > 5) penalty += 10 * (error_a_pct - 5);
+      if (error_b_pct > 5) penalty += 10 * (error_b_pct - 5);
+      if (error_gamma_pct > 5) penalty += 5 * (error_gamma_pct - 5);
+      const atomPenalty = (atomCount / 1000) * 0.2;
+      const score = error_a_pct + error_b_pct + 1.5 * error_gamma_pct + penalty + atomPenalty;
 
       const tier = classifyTier(error_a_pct, error_b_pct, error_gamma_pct);
       const result: MatrixResult = {
@@ -137,176 +165,132 @@ function runOptimization(config: {
   }
 
   // ============================================================
-  // PHASE 1: Dense exhaustive search (40% of time)
+  // PHASE 1: Exhaustive search with expanding radius (50% of time)
+  // Keeps increasing the search radius until time runs out.
+  // Each round re-scans from scratch at the new radius.
+  // The exponential growth of (2R+1)^4 ensures later rounds
+  // dominate computation time, making earlier redundancy negligible.
   // ============================================================
-  const phase1End = startTime + duration_ms * 0.4;
-  const limit1 = Math.min(scan_limit, 20);
+  const phase1End = startTime + duration_ms * 0.5;
+  let radius = 15;
 
-  outer1:
-  for (let n = -limit1; n <= limit1 && !shouldStop; n++) {
-    if (n === 0) continue;
-    for (let m = -limit1; m <= limit1 && !shouldStop; m++) {
-      for (let k = -limit1; k <= limit1; k++) {
-        for (let l = -limit1; l <= limit1; l++) {
-          testMatrix(n, m, k, l);
+  while (!shouldStop && performance.now() < phase1End) {
+    for (let n = -radius; n <= radius && !shouldStop; n++) {
+      for (let m = -radius; m <= radius && !shouldStop; m++) {
+        if (n === 0 && m === 0) continue;
+        for (let k = -radius; k <= radius; k++) {
+          for (let l = -radius; l <= radius; l++) {
+            testMatrix(n, m, k, l);
+          }
         }
-      }
-      postProgress('Phase 1: Exhaustive search');
-      if (performance.now() > phase1End) break outer1;
-    }
-  }
-
-  // Also search n=0 with m!=0
-  if (!shouldStop && performance.now() <= phase1End) {
-    for (let m = -limit1; m <= limit1 && !shouldStop; m++) {
-      if (m === 0) continue;
-      for (let k = -limit1; k <= limit1; k++) {
-        for (let l = -limit1; l <= limit1; l++) {
-          testMatrix(0, m, k, l);
-        }
+        postProgress(`Phase 1: Exhaustive search (radius ${radius})`);
+        if (performance.now() > phase1End) break;
       }
       if (performance.now() > phase1End) break;
     }
+    radius += 3;
   }
 
   // ============================================================
-  // PHASE 2: Intelligent angle matching (25% of time)
+  // PHASE 2: Angle-targeted search with expanding radius (30% of time)
+  // Pre-filters on angle match before testing, allowing much larger
+  // search radii since most candidates are skipped.
   // ============================================================
-  const phase2End = startTime + duration_ms * 0.65;
-  const limit2v1 = 25;
-  const limit2v2 = 50;
-  const gammaRad = monolayer.gamma * Math.PI / 180;
-  const baseCosG = Math.cos(gammaRad);
-  const baseSinG = Math.sin(gammaRad);
-  const monoA = monolayer.a;
-  const monoB = monolayer.b;
+  const phase2End = startTime + duration_ms * 0.8;
+  let angLimitV1 = 25;
+  let angLimitV2 = 50;
 
-  for (const target of targets) {
-    if (shouldStop || performance.now() > phase2End) break;
+  while (!shouldStop && performance.now() < phase2End) {
+    for (const target of targets) {
+      if (shouldStop || performance.now() > phase2End) break;
 
-    const targetCos = Math.cos(target.gamma * Math.PI / 180);
-    const tolerance = 0.08; // cos tolerance
+      const targetCos = Math.cos(target.gamma * Math.PI / 180);
+      const compCos = Math.cos((180 - target.gamma) * Math.PI / 180);
+      const tolerance = 0.06;
 
-    for (let n = -limit2v1; n <= limit2v1 && !shouldStop; n++) {
-      for (let m = -limit2v1; m <= limit2v1; m++) {
-        if (n === 0 && m === 0) continue;
+      for (let n = -angLimitV1; n <= angLimitV1 && !shouldStop; n++) {
+        for (let m = -angLimitV1; m <= angLimitV1; m++) {
+          if (n === 0 && m === 0) continue;
 
-        // Compute first vector length
-        const sx1 = n * monoA + m * monoB * baseCosG;
-        const sy1 = m * monoB * baseSinG;
-        const len1Sq = sx1 * sx1 + sy1 * sy1;
-        if (len1Sq < 0.01) continue;
-        const len1 = Math.sqrt(len1Sq);
+          const sx1 = n * monoA + m * monoB * baseCosG;
+          const sy1 = m * monoB * baseSinG;
+          const len1Sq = sx1 * sx1 + sy1 * sy1;
+          if (len1Sq < 0.01) continue;
+          const len1 = Math.sqrt(len1Sq);
 
-        // Quick check: is len1 within ~50% of any target a?
-        const ratioA = len1 / target.a;
-        if (ratioA < 0.5 || ratioA > 2.0) continue;
+          // Quick length filter: first vector should be within a factor
+          // of the target 'a' parameter
+          let lengthOk = false;
+          for (const t of targets) {
+            const ratio = len1 / t.a;
+            if (ratio > 0.3 && ratio < 3.0) { lengthOk = true; break; }
+          }
+          if (!lengthOk) continue;
 
-        for (let k = -limit2v2; k <= limit2v2; k++) {
-          for (let l = -limit2v2; l <= limit2v2; l++) {
-            if (k === 0 && l === 0) continue;
+          for (let k = -angLimitV2; k <= angLimitV2; k++) {
+            for (let l = -angLimitV2; l <= angLimitV2; l++) {
+              if (k === 0 && l === 0) continue;
 
-            const sx2 = k * monoA + l * monoB * baseCosG;
-            const sy2 = l * monoB * baseSinG;
-            const len2Sq = sx2 * sx2 + sy2 * sy2;
-            if (len2Sq < 0.01) continue;
-            const len2 = Math.sqrt(len2Sq);
+              const sx2 = k * monoA + l * monoB * baseCosG;
+              const sy2 = l * monoB * baseSinG;
+              const len2Sq = sx2 * sx2 + sy2 * sy2;
+              if (len2Sq < 0.01) continue;
 
-            const dot2d = sx1 * sx2 + sy1 * sy2;
-            const cosTheta = dot2d / (len1 * len2);
+              const cosTheta = (sx1 * sx2 + sy1 * sy2) / (len1 * Math.sqrt(len2Sq));
 
-            if (Math.abs(cosTheta - targetCos) < tolerance) {
-              testMatrix(n, m, k, l);
+              // Test if angle matches target or its complement
+              if (Math.abs(cosTheta - targetCos) < tolerance ||
+                  Math.abs(cosTheta - compCos) < tolerance) {
+                testMatrix(n, m, k, l);
+              }
             }
           }
-        }
 
-        postProgress('Phase 2: Angle matching');
+          postProgress(`Phase 2: Angle matching (${angLimitV1}x${angLimitV2})`);
+          if (performance.now() > phase2End) break;
+        }
         if (performance.now() > phase2End) break;
       }
-      if (performance.now() > phase2End) break;
     }
+    angLimitV1 += 5;
+    angLimitV2 += 10;
   }
 
   // ============================================================
-  // PHASE 3: Complementary angle search (15% of time)
+  // PHASE 3: Refinement around best results (20% of time)
+  // Repeatedly refines around top matches with increasing
+  // perturbation delta until time runs out.
   // ============================================================
-  const phase3End = startTime + duration_ms * 0.8;
+  let delta = 5;
 
-  for (const target of targets) {
-    if (shouldStop || performance.now() > phase3End) break;
+  while (!shouldStop && performance.now() < endTime) {
+    for (const target of targets) {
+      if (shouldStop || performance.now() > endTime) break;
 
-    const compGamma = 180 - target.gamma;
-    if (compGamma <= 0 || compGamma >= 180) continue;
+      const currentBest = bestResults.get(target.label) || [];
+      currentBest.sort((a, b) => a.score - b.score);
 
-    const compCos = Math.cos(compGamma * Math.PI / 180);
-    const tolerance = 0.08;
+      const topN = Math.min(currentBest.length, 50);
+      for (let idx = 0; idx < topN; idx++) {
+        if (shouldStop || performance.now() > endTime) break;
 
-    for (let n = -limit2v1; n <= limit2v1 && !shouldStop; n++) {
-      for (let m = -limit2v1; m <= limit2v1; m++) {
-        if (n === 0 && m === 0) continue;
+        const [bn, bm, bk, bl] = currentBest[idx].matrix;
 
-        const sx1 = n * monoA + m * monoB * baseCosG;
-        const sy1 = m * monoB * baseSinG;
-        const len1Sq = sx1 * sx1 + sy1 * sy1;
-        if (len1Sq < 0.01) continue;
-        const len1 = Math.sqrt(len1Sq);
-
-        for (let k = -limit2v2; k <= limit2v2; k++) {
-          for (let l = -limit2v2; l <= limit2v2; l++) {
-            if (k === 0 && l === 0) continue;
-
-            const sx2 = k * monoA + l * monoB * baseCosG;
-            const sy2 = l * monoB * baseSinG;
-            const len2Sq = sx2 * sx2 + sy2 * sy2;
-            if (len2Sq < 0.01) continue;
-            const len2 = Math.sqrt(len2Sq);
-
-            const dot2d = sx1 * sx2 + sy1 * sy2;
-            const cosTheta = dot2d / (len1 * len2);
-
-            if (Math.abs(cosTheta - compCos) < tolerance) {
-              testMatrix(n, m, k, l);
+        for (let dn = -delta; dn <= delta; dn++) {
+          for (let dm = -delta; dm <= delta; dm++) {
+            for (let dk = -delta; dk <= delta; dk++) {
+              for (let dl = -delta; dl <= delta; dl++) {
+                testMatrix(bn + dn, bm + dm, bk + dk, bl + dl);
+              }
             }
           }
+          if (performance.now() > endTime) break;
         }
 
-        postProgress('Phase 3: Complementary angle');
-        if (performance.now() > phase3End) break;
+        postProgress(`Phase 3: Refinement (delta ${delta})`);
       }
-      if (performance.now() > phase3End) break;
     }
-  }
-
-  // ============================================================
-  // PHASE 4: Refinement around best results (20% of time)
-  // ============================================================
-  const phase4End = startTime + duration_ms;
-
-  for (const target of targets) {
-    if (shouldStop || performance.now() > phase4End) break;
-
-    const currentBest = bestResults.get(target.label) || [];
-    currentBest.sort((a, b) => a.score - b.score);
-
-    for (const result of currentBest.slice(0, 30)) {
-      if (shouldStop || performance.now() > phase4End) break;
-
-      const [bn, bm, bk, bl] = result.matrix;
-      const delta = 5;
-
-      for (let dn = -delta; dn <= delta; dn++) {
-        for (let dm = -delta; dm <= delta; dm++) {
-          for (let dk = -delta; dk <= delta; dk++) {
-            for (let dl = -delta; dl <= delta; dl++) {
-              testMatrix(bn + dn, bm + dm, bk + dk, bl + dl);
-            }
-          }
-        }
-      }
-
-      postProgress('Phase 4: Refinement');
-    }
+    delta += 3;
   }
 
   // ============================================================
@@ -315,8 +299,11 @@ function runOptimization(config: {
   const allResults: TargetResults[] = targets.map(t => {
     const arr = bestResults.get(t.label) || [];
     arr.sort((a, b) => a.score - b.score);
-    return { target: t, results: arr.slice(0, 10) };
+    return { target: t, results: arr.slice(0, 20) };
   });
+
+  // Force a final progress update
+  postProgress('Complete', true);
 
   self.postMessage({
     type: 'result',
