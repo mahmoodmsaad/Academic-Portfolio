@@ -82,7 +82,7 @@ def lambda_handler(event, context):
         gamma = float(np.degrees(np.arccos(cos_gamma)))
         area = float(a * b * np.sin(np.radians(gamma)))
 
-        # Generate 3 supercell targets: 1x1, 2x1, 2x2
+        # Generate 3 supercell targets: 1x1, 2x2, 3x3
         targets = [
             {
                 'label': 'Supercell 1 (1x1)',
@@ -92,18 +92,18 @@ def lambda_handler(event, context):
                 'area': round(area, 4),
             },
             {
-                'label': 'Supercell 2 (2x1)',
-                'a': round(2 * a, 6),
-                'b': round(b, 6),
-                'gamma': round(gamma, 4),
-                'area': round(2 * area, 4),
-            },
-            {
-                'label': 'Supercell 3 (2x2)',
+                'label': 'Supercell 2 (2x2)',
                 'a': round(2 * a, 6),
                 'b': round(2 * b, 6),
                 'gamma': round(gamma, 4),
                 'area': round(4 * area, 4),
+            },
+            {
+                'label': 'Supercell 3 (3x3)',
+                'a': round(3 * a, 6),
+                'b': round(3 * b, 6),
+                'gamma': round(gamma, 4),
+                'area': round(9 * area, 4),
             },
         ]
 

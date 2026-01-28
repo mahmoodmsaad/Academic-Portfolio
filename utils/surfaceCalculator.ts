@@ -153,7 +153,7 @@ export function computeSurfaceTargets(
 
   return [
     { label: '1x1', a, b, gamma, area },
-    { label: '2x1', a: 2 * a, b, gamma, area: 2 * area },
     { label: '2x2', a: 2 * a, b: 2 * b, gamma, area: 4 * area },
+    { label: '3x3', a: 3 * a, b: 3 * b, gamma, area: 9 * area },
   ];
 }

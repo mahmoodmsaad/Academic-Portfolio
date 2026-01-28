@@ -20,6 +20,12 @@ dist-ssr
 studio/dist
 studio/.sanity
 
+# Lambda build artifacts
+lambda/surface_package/
+lambda/__pycache__/
+*.pyc
+lambda/*.zip
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

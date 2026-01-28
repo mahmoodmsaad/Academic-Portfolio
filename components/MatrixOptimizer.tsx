@@ -11,8 +11,8 @@ import type {
   TargetResults, WorkerOutMessage, WorkerProgressMessage,
 } from '../utils/matrixOptimizerTypes';
 
-// ASE Lambda API endpoint - set in .env as VITE_SURFACE_API
-const SURFACE_API_URL = import.meta.env.VITE_SURFACE_API as string | undefined;
+// ASE Lambda API endpoint (uses ASE Python for surface cell computation)
+const SURFACE_API_URL = 'https://oy34w61rc6.execute-api.us-east-1.amazonaws.com/prod/surface-targets';
 
 // === Tier badge colors ===
 const TIER_STYLES: Record<string, string> = {
