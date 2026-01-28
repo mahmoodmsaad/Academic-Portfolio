@@ -1,4 +1,4 @@
-import type { ErrorTier } from './matrixOptimizerTypes';
+import type { BaseAtom, ErrorTier } from './matrixOptimizerTypes';
 
 // === Vector math helpers (3D) ===
 
@@ -115,27 +115,116 @@ export function classifyTier(error_a: number, error_b: number, error_gamma: numb
 
 // === CIF lattice parameter parsing ===
 
-export function parseCIFLatticeParams(content: string): { a: number; b: number; gamma: number } {
-  const lines = content.split('\n');
-  let a = 0, b = 0, gamma = 90;
+function parseCifNumber(value: string | undefined): number | null {
+  if (!value) return null;
+  const cleaned = value.replace(/^\s+|\s+$/g, '').replace(/\(.*\)/, '');
+  if (!cleaned || cleaned === '?' || cleaned === '.') return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+}
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('_cell_length_a')) {
-      const val = trimmed.split(/\s+/)[1]?.replace(/\(.*\)/, '');
-      if (val) a = parseFloat(val);
-    } else if (trimmed.startsWith('_cell_length_b')) {
-      const val = trimmed.split(/\s+/)[1]?.replace(/\(.*\)/, '');
-      if (val) b = parseFloat(val);
-    } else if (trimmed.startsWith('_cell_angle_gamma')) {
-      const val = trimmed.split(/\s+/)[1]?.replace(/\(.*\)/, '');
-      if (val) gamma = parseFloat(val);
+function tokenizeCifLine(line: string): string[] {
+  const matches = line.match(/'(?:[^']*)'|"(?:[^"]*)"|\S+/g);
+  if (!matches) return [];
+  return matches.map(token => token.replace(/^['"]|['"]$/g, ''));
+}
+
+function extractElementSymbol(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^A-Za-z]/g, '');
+  const match = cleaned.match(/[A-Z][a-z]?/);
+  return match ? match[0] : null;
+}
+
+export function parseCIFLatticeParams(content: string): { a: number; b: number; gamma: number; atoms: BaseAtom[] } {
+  const lines = content.split('\n');
+  let a = 0;
+  let b = 0;
+  let gamma = 90;
+  const atoms: BaseAtom[] = [];
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    if (line.startsWith('_cell_length_a')) {
+      const val = line.split(/\s+/)[1];
+      const parsed = parseCifNumber(val);
+      if (parsed !== null) a = parsed;
+      i += 1;
+      continue;
     }
+    if (line.startsWith('_cell_length_b')) {
+      const val = line.split(/\s+/)[1];
+      const parsed = parseCifNumber(val);
+      if (parsed !== null) b = parsed;
+      i += 1;
+      continue;
+    }
+    if (line.startsWith('_cell_angle_gamma')) {
+      const val = line.split(/\s+/)[1];
+      const parsed = parseCifNumber(val);
+      if (parsed !== null) gamma = parsed;
+      i += 1;
+      continue;
+    }
+
+    if (line.toLowerCase() === 'loop_') {
+      const headers: string[] = [];
+      i += 1;
+      while (i < lines.length && lines[i].trim().startsWith('_')) {
+        headers.push(lines[i].trim().split(/\s+/)[0]);
+        i += 1;
+      }
+
+      const headerIndex = new Map<string, number>();
+      headers.forEach((header, idx) => headerIndex.set(header, idx));
+      const hasAtomLoop =
+        headerIndex.has('_atom_site_fract_x') &&
+        headerIndex.has('_atom_site_fract_y');
+
+      while (i < lines.length) {
+        const dataLine = lines[i].trim();
+        if (!dataLine || dataLine.startsWith('#')) {
+          i += 1;
+          continue;
+        }
+        if (dataLine.toLowerCase() === 'loop_' || dataLine.startsWith('_') || dataLine.startsWith('data_')) {
+          break;
+        }
+
+        if (hasAtomLoop) {
+          const tokens = tokenizeCifLine(dataLine);
+          if (tokens.length >= headers.length) {
+            const symbol =
+              extractElementSymbol(tokens[headerIndex.get('_atom_site_type_symbol') ?? -1]) ??
+              extractElementSymbol(tokens[headerIndex.get('_atom_site_label') ?? -1]);
+            const x = parseCifNumber(tokens[headerIndex.get('_atom_site_fract_x') ?? -1]);
+            const y = parseCifNumber(tokens[headerIndex.get('_atom_site_fract_y') ?? -1]);
+            const z = parseCifNumber(tokens[headerIndex.get('_atom_site_fract_z') ?? -1]);
+
+            if (symbol && x !== null && y !== null) {
+              atoms.push({
+                symbol,
+                x,
+                y,
+                z: z !== null ? z : 0.5,
+              });
+            }
+          }
+        }
+        i += 1;
+      }
+
+      continue;
+    }
+
+    i += 1;
   }
 
   if (a === 0 || b === 0) {
     throw new Error('Could not find valid cell parameters (a, b) in CIF file');
   }
 
-  return { a, b, gamma };
+  return { a, b, gamma, atoms };
 }

@@ -7,7 +7,7 @@ import { METALS, MONOLAYER_PRESETS, getMetalBySymbol, getMonolayerByName } from 
 import { computeSurfaceTargets } from '../utils/surfaceCalculator';
 import { parseCIFLatticeParams } from '../utils/matrixMath';
 import type {
-  WizardStep, SurfaceCellParams, MonolayerMaterial, MatrixResult,
+  BaseAtom, WizardStep, SurfaceCellParams, MonolayerMaterial, MatrixResult,
   TargetResults, WorkerOutMessage, WorkerProgressMessage,
 } from '../utils/matrixOptimizerTypes';
 
@@ -62,7 +62,7 @@ const MatrixOptimizer: React.FC = () => {
   const [customB, setCustomB] = useState('');
   const [customGamma, setCustomGamma] = useState('120');
   const [customAtomsPerCell, setCustomAtomsPerCell] = useState('2');
-  const [cifParsed, setCifParsed] = useState<{ a: number; b: number; gamma: number } | null>(null);
+  const [cifParsed, setCifParsed] = useState<{ a: number; b: number; gamma: number; atoms: BaseAtom[] } | null>(null);
   const [cifError, setCifError] = useState('');
   const [monolayer, setMonolayer] = useState<MonolayerMaterial | null>(null);
 
@@ -172,11 +172,13 @@ const MatrixOptimizer: React.FC = () => {
         crystal_system: Math.abs(g - 120) < 1 ? 'hexagonal' : Math.abs(g - 90) < 1 ? 'rectangular' : 'oblique',
       };
     } else if (monolayerMode === 'cif' && cifParsed) {
+      const atomsPerCell = Math.max(1, cifParsed.atoms.length || 2);
       mat = {
         name: 'CIF Upload',
         a: cifParsed.a, b: cifParsed.b, gamma: cifParsed.gamma,
-        atoms_per_cell: 2,
+        atoms_per_cell: atomsPerCell,
         crystal_system: Math.abs(cifParsed.gamma - 120) < 1 ? 'hexagonal' : Math.abs(cifParsed.gamma - 90) < 1 ? 'rectangular' : 'oblique',
+        baseAtoms: cifParsed.atoms.length ? cifParsed.atoms : undefined,
       };
     }
 
@@ -334,6 +336,7 @@ const MatrixOptimizer: React.FC = () => {
     // Generate supercell atoms from base atoms using transformation matrix
     // Transform: (fx', fy') = M^(-1) * (fx + i, fy + j) where M^(-1) = (1/det) * [l, -m; -k, n]
     const supercellAtoms: { symbol: string; x: number; y: number; z: number }[] = [];
+    const atomKeys = new Set<string>();
 
     // Get base atoms (or use defaults if not defined)
     const baseAtoms = monolayer.baseAtoms || [
@@ -342,7 +345,10 @@ const MatrixOptimizer: React.FC = () => {
     ];
 
     // Search range for tiling - need to cover all integer offsets that map into [0,1) in supercell
-    const searchRange = Math.max(Math.abs(n), Math.abs(m), Math.abs(k), Math.abs(l)) + 2;
+    const searchRange = Math.max(
+      Math.abs(n) + Math.abs(m),
+      Math.abs(k) + Math.abs(l)
+    ) + 2;
 
     for (let i = -searchRange; i <= searchRange; i++) {
       for (let j = -searchRange; j <= searchRange; j++) {
@@ -366,14 +372,9 @@ const MatrixOptimizer: React.FC = () => {
 
           // Check if this atom is inside the supercell [0, 1)
           if (wrappedX >= -eps && wrappedX < 1 - eps && wrappedY >= -eps && wrappedY < 1 - eps) {
-            // Check for duplicates
-            const isDuplicate = supercellAtoms.some(a =>
-              a.symbol === atom.symbol &&
-              Math.abs(a.x - wrappedX) < 0.01 &&
-              Math.abs(a.y - wrappedY) < 0.01 &&
-              Math.abs(a.z - atom.z) < 0.01
-            );
-            if (!isDuplicate) {
+            const key = `${atom.symbol}:${Math.round(wrappedX * 1e6)}:${Math.round(wrappedY * 1e6)}:${Math.round(atom.z * 1e6)}`;
+            if (!atomKeys.has(key)) {
+              atomKeys.add(key);
               supercellAtoms.push({ symbol: atom.symbol, x: wrappedX, y: wrappedY, z: atom.z });
             }
           }
@@ -797,7 +798,12 @@ const MatrixOptimizer: React.FC = () => {
                     )}
                     {cifParsed && (
                       <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
-                        Parsed: a={cifParsed.a.toFixed(3)} A, b={cifParsed.b.toFixed(3)} A, gamma={cifParsed.gamma.toFixed(1)} deg
+                        Parsed: a={cifParsed.a.toFixed(3)} A, b={cifParsed.b.toFixed(3)} A, gamma={cifParsed.gamma.toFixed(1)} deg, atoms={cifParsed.atoms.length}
+                      </div>
+                    )}
+                    {cifParsed && cifParsed.atoms.length === 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                        No atom sites found in CIF. CIF export will use a generic 2-atom cell.
                       </div>
                     )}
                   </div>

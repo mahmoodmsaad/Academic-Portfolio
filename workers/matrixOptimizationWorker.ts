@@ -95,6 +95,16 @@ function runOptimization(config: {
     } as WorkerProgressMessage);
   }
 
+  function insertResult(arr: MatrixResult[], result: MatrixResult, maxSize: number) {
+    if (arr.length >= maxSize && arr[arr.length - 1]?.score <= result.score) {
+      return;
+    }
+    let insertAt = arr.findIndex(r => r.score > result.score);
+    if (insertAt === -1) insertAt = arr.length;
+    arr.splice(insertAt, 0, result);
+    if (arr.length > maxSize) arr.length = maxSize;
+  }
+
   function testMatrix(n: number, m: number, k: number, l: number) {
     const det = n * l - m * k;
     const absDet = Math.abs(det);
@@ -154,13 +164,7 @@ function runOptimization(config: {
       };
 
       const arr = bestResults.get(meta.target.label)!;
-      arr.push(result);
-
-      // Keep rolling top 50
-      if (arr.length > 100) {
-        arr.sort((a, b) => a.score - b.score);
-        arr.length = 50;
-      }
+      insertResult(arr, result, 50);
     }
   }
 
@@ -179,7 +183,9 @@ function runOptimization(config: {
       for (let m = -radius; m <= radius && !shouldStop; m++) {
         if (n === 0 && m === 0) continue;
         for (let k = -radius; k <= radius; k++) {
+          if (performance.now() > phase1End) break;
           for (let l = -radius; l <= radius; l++) {
+            if (performance.now() > phase1End) break;
             testMatrix(n, m, k, l);
           }
         }
@@ -268,7 +274,6 @@ function runOptimization(config: {
       if (shouldStop || performance.now() > endTime) break;
 
       const currentBest = bestResults.get(target.label) || [];
-      currentBest.sort((a, b) => a.score - b.score);
 
       const topN = Math.min(currentBest.length, 50);
       for (let idx = 0; idx < topN; idx++) {
