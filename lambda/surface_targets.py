@@ -3,9 +3,11 @@ AWS Lambda function for ASE-based surface target generation.
 Uses Atomic Simulation Environment to compute surface unit cell parameters
 for any element + Miller index combination. ASE automatically handles
 lattice parameters - no hardcoding needed.
+Also generates CIF files for each supercell target.
 """
 import json
 import numpy as np
+from io import BytesIO
 
 
 def lambda_handler(event, context):
@@ -36,6 +38,7 @@ def lambda_handler(event, context):
         # Import ASE here (cold start optimization)
         from ase.build import bulk, surface
         from ase.data import atomic_numbers, chemical_symbols
+        from ase.io import write
 
         # Validate element
         if element not in chemical_symbols and element not in atomic_numbers:
@@ -60,7 +63,7 @@ def lambda_handler(event, context):
             'num_atoms': len(bulk_atoms),
         }
 
-        # Create the surface slab - ASE handles everything
+        # Create the surface slab for parameter extraction (1 layer, no vacuum)
         try:
             slab = surface(bulk_atoms, (h, k, l), layers=1, vacuum=0.0, periodic=True)
         except Exception as e:
@@ -82,30 +85,38 @@ def lambda_handler(event, context):
         gamma = float(np.degrees(np.arccos(cos_gamma)))
         area = float(a * b * np.sin(np.radians(gamma)))
 
-        # Generate 3 supercell targets: 1x1, 2x2, 3x3
-        targets = [
-            {
-                'label': 'Supercell 1 (1x1)',
-                'a': round(a, 6),
-                'b': round(b, 6),
+        # Create a proper slab for CIF export (4 layers + vacuum)
+        try:
+            slab_for_cif = surface(bulk_atoms, (h, k, l), layers=4, vacuum=10.0, periodic=True)
+        except Exception:
+            slab_for_cif = None
+
+        # Generate 4 supercell targets: 1x1, 2x2, 3x3, 4x4
+        scales = [1, 2, 3, 4]
+        targets = []
+        for s in scales:
+            target = {
+                'label': f'Supercell {s} ({s}x{s})',
+                'a': round(s * a, 6),
+                'b': round(s * b, 6),
                 'gamma': round(gamma, 4),
-                'area': round(area, 4),
-            },
-            {
-                'label': 'Supercell 2 (2x2)',
-                'a': round(2 * a, 6),
-                'b': round(2 * b, 6),
-                'gamma': round(gamma, 4),
-                'area': round(4 * area, 4),
-            },
-            {
-                'label': 'Supercell 3 (3x3)',
-                'a': round(3 * a, 6),
-                'b': round(3 * b, 6),
-                'gamma': round(gamma, 4),
-                'area': round(9 * area, 4),
-            },
-        ]
+                'area': round(s * s * area, 4),
+            }
+
+            # Generate CIF content for this supercell
+            if slab_for_cif is not None:
+                try:
+                    if s == 1:
+                        supercell = slab_for_cif.copy()
+                    else:
+                        supercell = slab_for_cif * (s, s, 1)
+                    buf = BytesIO()
+                    write(buf, supercell, format='cif')
+                    target['cif'] = buf.getvalue().decode('utf-8')
+                except Exception as cif_err:
+                    target['cif_error'] = str(cif_err)
+
+            targets.append(target)
 
         # Surface vectors for reference
         surface_info = {
@@ -152,22 +163,16 @@ def error_response(status_code, message):
 
 # For local testing
 if __name__ == '__main__':
-    # Test Pt(991)
+    # Test Pt(111)
     test_event = {
         'body': json.dumps({
             'element': 'Pt',
-            'h': 9, 'k': 9, 'l': 1
-        })
-    }
-    result = lambda_handler(test_event, None)
-    print(json.dumps(json.loads(result['body']), indent=2))
-
-    # Test Cu(111)
-    test_event2 = {
-        'body': json.dumps({
-            'element': 'Cu',
             'h': 1, 'k': 1, 'l': 1
         })
     }
-    result2 = lambda_handler(test_event2, None)
-    print(json.dumps(json.loads(result2['body']), indent=2))
+    result = lambda_handler(test_event, None)
+    body = json.loads(result['body'])
+    print(f"Targets: {len(body.get('targets', []))}")
+    for t in body.get('targets', []):
+        has_cif = 'cif' in t
+        print(f"  {t['label']}: a={t['a']}, b={t['b']}, gamma={t['gamma']}, CIF={'yes' if has_cif else 'no'}")

@@ -15,11 +15,12 @@ export interface MetalEntry {
 
 // Surface cell parameters for a target
 export interface SurfaceCellParams {
-  label: string; // e.g. "1x1", "2x1", "2x2"
+  label: string; // e.g. "1x1", "2x2", "3x3", "4x4"
   a: number;
   b: number;
   gamma: number; // degrees
   area: number;
+  cif?: string; // CIF file content from ASE (metal surface slab)
 }
 
 // Monolayer material definition

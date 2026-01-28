@@ -7,7 +7,7 @@ import { METALS, MONOLAYER_PRESETS, getMetalBySymbol, getMonolayerByName } from 
 import { computeSurfaceTargets } from '../utils/surfaceCalculator';
 import { parseCIFLatticeParams } from '../utils/matrixMath';
 import type {
-  WizardStep, SurfaceCellParams, MonolayerMaterial,
+  WizardStep, SurfaceCellParams, MonolayerMaterial, MatrixResult,
   TargetResults, WorkerOutMessage, WorkerProgressMessage,
 } from '../utils/matrixOptimizerTypes';
 
@@ -76,10 +76,18 @@ const MatrixOptimizer: React.FC = () => {
   const [results, setResults] = useState<TargetResults[] | null>(null);
   const [activeTab, setActiveTab] = useState(0);
 
-  // === Cleanup worker on unmount ===
+  // === Blob URL tracking for memory cleanup ===
+  const blobUrlsRef = useRef<string[]>([]);
+
+  // === Cleanup worker + blob URLs on unmount ===
   useEffect(() => {
     return () => {
       if (workerRef.current) workerRef.current.terminate();
+      // Revoke all tracked blob URLs to free memory
+      for (const url of blobUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
+      blobUrlsRef.current = [];
     };
   }, []);
 
@@ -293,11 +301,75 @@ const MatrixOptimizer: React.FC = () => {
 
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
+    blobUrlsRef.current.push(url);
     const a = document.createElement('a');
     a.href = url;
     a.download = `matrix_optimizer_${activeElement}_${millerH}${millerK}${millerL}_${monolayer?.name || 'custom'}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+    blobUrlsRef.current = blobUrlsRef.current.filter(u => u !== url);
+  };
+
+  // === Download CIF for a surface target (from ASE Lambda data) ===
+  const downloadTargetCIF = (target: SurfaceCellParams) => {
+    if (!target.cif) return;
+    const blob = new Blob([target.cif], { type: 'chemical/x-cif' });
+    const url = URL.createObjectURL(blob);
+    blobUrlsRef.current.push(url);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeElement}_${millerH}${millerK}${millerL}_${target.label.replace(/[^a-zA-Z0-9]/g, '_')}.cif`;
+    a.click();
+    URL.revokeObjectURL(url);
+    blobUrlsRef.current = blobUrlsRef.current.filter(u => u !== url);
+  };
+
+  // === Generate and download CIF for best-fit monolayer supercell ===
+  const downloadMonolayerCIF = (result: MatrixResult, targetLabel: string) => {
+    if (!monolayer) return;
+    const [n, m, k, l] = result.matrix;
+
+    // Build a minimal CIF with the achieved supercell lattice parameters
+    const cif = [
+      `data_${monolayer.name}_supercell_${targetLabel.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      `_cell_length_a    ${result.achieved_a.toFixed(6)}`,
+      `_cell_length_b    ${result.achieved_b.toFixed(6)}`,
+      `_cell_length_c    20.000000`,
+      `_cell_angle_alpha 90.0000`,
+      `_cell_angle_beta  90.0000`,
+      `_cell_angle_gamma ${result.achieved_gamma.toFixed(4)}`,
+      `_symmetry_space_group_name_H-M 'P 1'`,
+      `_symmetry_Int_Tables_number    1`,
+      ``,
+      `# Supercell transformation matrix:`,
+      `# | ${n}  ${m}  0 |`,
+      `# | ${k}  ${l}  0 |`,
+      `# | 0  0  1 |`,
+      `# Determinant: ${Math.abs(n * l - m * k)}`,
+      `# Monolayer: ${monolayer.name} (a=${monolayer.a}, b=${monolayer.b}, gamma=${monolayer.gamma})`,
+      `# Error: a=${result.error_a_pct.toFixed(2)}%, b=${result.error_b_pct.toFixed(2)}%, gamma=${result.error_gamma_pct.toFixed(2)}%`,
+      `# Atoms in supercell: ${result.atom_count}`,
+      `# Target: ${targetLabel}`,
+      `# Surface: ${activeElement}(${millerH}${millerK}${millerL})`,
+      ``,
+      `loop_`,
+      `_atom_site_label`,
+      `_atom_site_type_symbol`,
+      `_atom_site_fract_x`,
+      `_atom_site_fract_y`,
+      `_atom_site_fract_z`,
+      `X1 X 0.00000 0.00000 0.00000`,
+    ].join('\n');
+
+    const blob = new Blob([cif], { type: 'chemical/x-cif' });
+    const url = URL.createObjectURL(blob);
+    blobUrlsRef.current.push(url);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${monolayer.name}_on_${activeElement}${millerH}${millerK}${millerL}_${targetLabel.replace(/[^a-zA-Z0-9]/g, '_')}_matrix_${n}${m}${k}${l}.cif`;
+    a.click();
+    URL.revokeObjectURL(url);
+    blobUrlsRef.current = blobUrlsRef.current.filter(u => u !== url);
   };
 
   // === Step indicator ===
@@ -519,6 +591,7 @@ const MatrixOptimizer: React.FC = () => {
                             <th className="px-4 py-2 text-right font-semibold text-slate-700">b (A)</th>
                             <th className="px-4 py-2 text-right font-semibold text-slate-700">gamma (deg)</th>
                             <th className="px-4 py-2 text-right font-semibold text-slate-700">Area (A2)</th>
+                            <th className="px-4 py-2 text-center font-semibold text-slate-700">CIF</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -529,6 +602,21 @@ const MatrixOptimizer: React.FC = () => {
                               <td className="px-4 py-2 text-right font-mono">{t.b.toFixed(4)}</td>
                               <td className="px-4 py-2 text-right font-mono">{t.gamma.toFixed(2)}</td>
                               <td className="px-4 py-2 text-right font-mono">{t.area.toFixed(2)}</td>
+                              <td className="px-4 py-2 text-center">
+                                {t.cif ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadTargetCIF(t)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-academic-700 bg-academic-50 hover:bg-academic-100 rounded border border-academic-200 transition-colors"
+                                    title={`Download ${activeElement}(${millerH}${millerK}${millerL}) ${t.label} slab as CIF`}
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    .cif
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-slate-400">--</span>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -821,6 +909,7 @@ const MatrixOptimizer: React.FC = () => {
                             <th className="px-3 py-2 font-semibold text-slate-700 text-right">Err g%</th>
                             <th className="px-3 py-2 font-semibold text-slate-700 text-right">Atoms</th>
                             <th className="px-3 py-2 font-semibold text-slate-700">Tier</th>
+                            <th className="px-3 py-2 font-semibold text-slate-700 text-center">CIF</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -841,6 +930,17 @@ const MatrixOptimizer: React.FC = () => {
                                 <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${TIER_STYLES[r.tier]}`}>
                                   {TIER_LABELS[r.tier]}
                                 </span>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => downloadMonolayerCIF(r, results[activeTab].target.label)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200 transition-colors"
+                                  title="Download monolayer supercell CIF"
+                                >
+                                  <Download className="w-3 h-3" />
+                                  .cif
+                                </button>
                               </td>
                             </tr>
                           ))}

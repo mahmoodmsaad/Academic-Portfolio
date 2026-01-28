@@ -155,5 +155,6 @@ export function computeSurfaceTargets(
     { label: '1x1', a, b, gamma, area },
     { label: '2x2', a: 2 * a, b: 2 * b, gamma, area: 4 * area },
     { label: '3x3', a: 3 * a, b: 3 * b, gamma, area: 9 * area },
+    { label: '4x4', a: 4 * a, b: 4 * b, gamma, area: 16 * area },
   ];
 }
