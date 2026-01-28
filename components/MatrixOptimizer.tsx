@@ -334,7 +334,9 @@ const MatrixOptimizer: React.FC = () => {
     const absDet = Math.abs(det);
 
     // Generate supercell atoms from base atoms using transformation matrix
-    // Transform: (fx', fy') = M^(-1) * (fx + i, fy + j) where M^(-1) = (1/det) * [l, -m; -k, n]
+    // M = [n, m; k, l] transforms old lattice to new: a' = n*a + m*b, b' = k*a + l*b
+    // For fractional coords: (M^T) * [fx'; fy'] = [fx; fy], so [fx'; fy'] = (M^T)^(-1) * [fx; fy]
+    // (M^T)^(-1) = (1/det) * [l, -k; -m, n]
     const supercellAtoms: { symbol: string; x: number; y: number; z: number }[] = [];
     const atomKeys = new Set<string>();
 
@@ -357,9 +359,9 @@ const MatrixOptimizer: React.FC = () => {
           const ox = atom.x + i;
           const oy = atom.y + j;
 
-          // Transform to supercell fractional coordinates
-          const fx = (l * ox - m * oy) / det;
-          const fy = (-k * ox + n * oy) / det;
+          // Transform to supercell fractional coordinates using (M^T)^(-1)
+          const fx = (l * ox - k * oy) / det;
+          const fy = (-m * ox + n * oy) / det;
 
           // Wrap to [0, 1) with tolerance
           const eps = 1e-6;

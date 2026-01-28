@@ -95,10 +95,44 @@ function runOptimization(config: {
     } as WorkerProgressMessage);
   }
 
+  // Check if two results are geometrically equivalent (same a, b, gamma within tolerance)
+  function isEquivalent(r1: MatrixResult, r2: MatrixResult): boolean {
+    const tol = 0.001; // 0.001 Angstrom tolerance
+    const angleTol = 0.01; // 0.01 degree tolerance
+    // Check direct match
+    if (Math.abs(r1.achieved_a - r2.achieved_a) < tol &&
+        Math.abs(r1.achieved_b - r2.achieved_b) < tol &&
+        Math.abs(r1.achieved_gamma - r2.achieved_gamma) < angleTol) {
+      return true;
+    }
+    // Check swapped a<->b match (equivalent supercell)
+    if (Math.abs(r1.achieved_a - r2.achieved_b) < tol &&
+        Math.abs(r1.achieved_b - r2.achieved_a) < tol &&
+        Math.abs(r1.achieved_gamma - r2.achieved_gamma) < angleTol) {
+      return true;
+    }
+    return false;
+  }
+
   function insertResult(arr: MatrixResult[], result: MatrixResult, maxSize: number) {
+    // Skip if result is worse than worst kept result
     if (arr.length >= maxSize && arr[arr.length - 1]?.score <= result.score) {
       return;
     }
+
+    // Check for geometrically equivalent results - keep the one with fewer atoms
+    for (let i = 0; i < arr.length; i++) {
+      if (isEquivalent(arr[i], result)) {
+        // Keep the one with fewer atoms (simpler matrix)
+        if (result.atom_count < arr[i].atom_count) {
+          arr.splice(i, 1); // Remove the old one, will insert new one below
+          break;
+        } else {
+          return; // Existing one is better or equal, skip this result
+        }
+      }
+    }
+
     let insertAt = arr.findIndex(r => r.score > result.score);
     if (insertAt === -1) insertAt = arr.length;
     arr.splice(insertAt, 0, result);
