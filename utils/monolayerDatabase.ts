@@ -149,12 +149,14 @@ export const MONOLAYER_PRESETS: MonolayerMaterial[] = [
 
   // Rectangular monolayers (gamma = 90)
   {
+    // Phosphorene: puckered honeycomb with buckling height ~1.35 Å
+    // In-plane P-P bonds: ~2.21 Å, Puckered P-P bonds: ~2.26 Å
     name: 'Phosphorene', a: 3.314, b: 4.376, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular',
     baseAtoms: [
-      { symbol: 'P', x: 0.00, y: 0.08, z: 0.45 },
-      { symbol: 'P', x: 0.50, y: 0.42, z: 0.45 },
-      { symbol: 'P', x: 0.00, y: 0.58, z: 0.55 },
-      { symbol: 'P', x: 0.50, y: 0.92, z: 0.55 },
+      { symbol: 'P', x: 0.00, y: 0.0829, z: 0.4661 },
+      { symbol: 'P', x: 0.50, y: 0.4171, z: 0.4661 },
+      { symbol: 'P', x: 0.00, y: 0.5829, z: 0.5339 },
+      { symbol: 'P', x: 0.50, y: 0.9171, z: 0.5339 },
     ]
   },
   {
