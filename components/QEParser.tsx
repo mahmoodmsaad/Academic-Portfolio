@@ -403,28 +403,181 @@ const QEParser: React.FC = () => {
       }
 
       const volumePerAtom = structureData.volume / structureData.numAtoms;
-      const prompt = `I need help setting up a Quantum ESPRESSO DFT calculation with these parameters:
 
-**Structure Information:**
+      // Detect material dimensionality (2D materials have large vacuum in one direction)
+      const cellDims = [structureData.cellParams.a, structureData.cellParams.b, structureData.cellParams.c];
+      const avgDim = cellDims.reduce((a, b) => a + b, 0) / 3;
+      const is2D = cellDims.some(dim => dim > avgDim * 2);
+
+      // Detect if structure likely contains heavy elements (Z > 36)
+      const heavyElements = ['Rb', 'Sr', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'I', 'Xe',
+                             'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu',
+                             'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn',
+                             'Fr', 'Ra', 'Ac', 'Th', 'Pa', 'U', 'Np', 'Pu'];
+      const hasHeavyElements = structureData.elements.some(el => heavyElements.includes(el));
+
+      // Detect transition metals and elements that may need DFT+U
+      const transitionMetals = ['Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au'];
+      const correlated = ['Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Ce', 'Pr', 'Nd', 'Eu', 'Gd'];
+      const hasTM = structureData.elements.some(el => transitionMetals.includes(el));
+      const needsDFTU = structureData.elements.some(el => correlated.includes(el));
+
+      // Detect if vdW corrections might be needed
+      const vdwMaterials = ['C', 'B', 'N', 'S', 'Se', 'Te'];
+      const needsVDW = is2D || structureData.elements.some(el => vdwMaterials.includes(el));
+
+      const prompt = `You are an expert computational materials scientist. Provide detailed, research-quality DFT calculation recommendations for Quantum ESPRESSO.
+
+# SYSTEM INFORMATION
+
+**Material Composition:**
 - Chemical formula: ${structureData.formula}
-- Elements present: ${structureData.elements.join(', ')}
-- Number of atoms: ${structureData.numAtoms}
-- Cell dimensions (Å): a=${structureData.cellParams.a.toFixed(3)}, b=${structureData.cellParams.b.toFixed(3)}, c=${structureData.cellParams.c.toFixed(3)}
-- Cell angles (°): α=${structureData.cellParams.alpha.toFixed(1)}, β=${structureData.cellParams.beta.toFixed(1)}, γ=${structureData.cellParams.gamma.toFixed(1)}
-- Volume per atom: ${volumePerAtom.toFixed(2)} Å³
+- Elements: ${structureData.elements.join(', ')}
+- Total atoms in unit cell: ${structureData.numAtoms}
 
-**Calculation Settings:**
-- Calculation type: ${calcType}
-- XC Functional: ${functional}
+**Crystallographic Parameters:**
+- Lattice parameters: a=${structureData.cellParams.a.toFixed(4)} Å, b=${structureData.cellParams.b.toFixed(4)} Å, c=${structureData.cellParams.c.toFixed(4)} Å
+- Angles: α=${structureData.cellParams.alpha.toFixed(2)}°, β=${structureData.cellParams.beta.toFixed(2)}°, γ=${structureData.cellParams.gamma.toFixed(2)}°
+- Unit cell volume: ${structureData.volume.toFixed(3)} Å³
+- Volume per atom: ${volumePerAtom.toFixed(3)} Å³/atom
+- Dimensionality: ${is2D ? '2D layered material (assumed)' : '3D bulk material'}
 
-Please provide specific recommendations for:
+**System Characteristics:**
+- Contains heavy elements (Z>36): ${hasHeavyElements ? 'YES - Consider spin-orbit coupling' : 'NO'}
+- Contains transition metals: ${hasTM ? 'YES - ' + structureData.elements.filter(el => transitionMetals.includes(el)).join(', ') : 'NO'}
+- May need DFT+U: ${needsDFTU ? 'YES - ' + structureData.elements.filter(el => correlated.includes(el)).join(', ') : 'NO'}
+- May need vdW corrections: ${needsVDW ? 'YES' : 'NO'}
 
-1. **K-point grid**: Recommend optimal k-point mesh based on cell size and calculation type.
-2. **Cutoff energies**: Recommend ecutwfc and ecutrho values appropriate for the elements present.
-3. **Pseudopotentials**: Recommend specific pseudopotential types (NC, US, PAW) from SSSP or PseudoDojo.
-4. **Convergence parameters**: Suggest conv_thr for SCF, and forc_conv_thr/press_conv_thr for relaxations.
-5. **Smearing**: Recommend smearing type and degauss value based on material type.
-6. **Additional tips**: Element-specific considerations (DFT+U, SOC, vdW corrections).`;
+**Requested Calculation:**
+- Calculation type: ${calcType} (${calcType === 'scf' ? 'electronic ground state' : calcType === 'relax' ? 'geometry optimization' : calcType === 'vc-relax' ? 'full cell relaxation' : calcType === 'bands' ? 'electronic band structure' : calcType === 'nscf' ? 'non-self-consistent for post-processing' : 'density of states'})
+- Exchange-correlation functional: ${functional}
+
+# REQUIRED EXPERT RECOMMENDATIONS
+
+Please provide specific, justified recommendations based on recent DFT best practices and literature:
+
+## 1. K-POINT SAMPLING
+- **Recommended k-mesh**: Provide specific grid (e.g., 4x4x4, 8x8x1) based on:
+  * Cell dimensions (use ~40 Å·k-point density for metals, ~25-30 for semiconductors)
+  * Calculation type (${calcType} requires ${calcType === 'bands' || calcType === 'dos' ? 'dense' : calcType === 'nscf' ? 'specific path' : 'converged'} k-points)
+  * Material dimensionality (${is2D ? '2D: use 1 k-point in vacuum direction' : '3D: uniform sampling'})
+- **Justification**: Explain your reasoning
+- **Convergence testing**: Suggest 2-3 k-grids to test (coarse → fine)
+- **Path for bands**: If ${calcType === 'bands' ? 'relevant' : 'not applicable'}, suggest high-symmetry k-path
+
+## 2. ENERGY CUTOFFS (ecutwfc & ecutrho)
+- **Wavefunction cutoff (ecutwfc)**: Provide value in Ry for each element:
+  ${structureData.elements.map(el => `  * ${el}: ___ Ry (justify based on pseudopotential hardness)`).join('\n')}
+- **Recommended ecutwfc**: ___ Ry (use maximum + 20% safety margin)
+- **Charge density cutoff (ecutrho)**: ___ Ry (4x ecutwfc for NC, 8-12x for US/PAW)
+- **Convergence testing**: Suggest testing ecutwfc at [__, __, __] Ry
+- **Cost vs accuracy trade-off**: Comment on computational cost
+
+## 3. PSEUDOPOTENTIALS
+- **Recommended library**: SSSP (efficiency/precision?) or PseudoDojo (standard/stringent?)
+- **Pseudopotential type**: NC (norm-conserving), US (ultrasoft), or PAW?
+- **Specific recommendations for each element**:
+${structureData.elements.map(el => `  * ${el}: [Library].[type].[version] - [valence configuration] (e.g., SSSP.efficiency.pbesol.031.upf)`).join('\n')}
+- **Rationale**: Why these choices for this system?
+- **Where to download**: Direct links if possible
+
+## 4. CONVERGENCE THRESHOLDS
+- **SCF convergence (conv_thr)**:
+  * For ${calcType}: ___ (typically 1e-6 to 1e-8 Ry)
+  * Justification: ${calcType === 'scf' ? 'final SCF' : calcType === 'relax' || calcType === 'vc-relax' ? 'during optimization' : 'for accurate band structure'}
+- **Force convergence (forc_conv_thr)**: ${calcType === 'relax' || calcType === 'vc-relax' ? '___ Ry/Bohr (typically 1e-3 to 1e-4)' : 'N/A'}
+- **Pressure convergence (press_conv_thr)**: ${calcType === 'vc-relax' ? '___ kbar (typically 0.5)' : 'N/A'}
+- **Electron mixing**: Suggest mixing_beta (0.3-0.7) and mixing_mode (plain/local-TF)
+
+## 5. SMEARING & OCCUPATION
+- **Metallic or insulator**: Classify based on ${structureData.formula} composition
+- **Smearing type**:
+  * If metallic: 'marzari-vanderbilt', 'gaussian', or 'fermi-dirac'?
+  * If insulator: 'fixed' or small gaussian
+- **Degauss value**: ___ Ry (typically 0.01-0.03 Ry for metals, 0.001 Ry for semiconductors)
+- **Justification**: Why this choice?
+
+## 6. ADVANCED DFT CORRECTIONS
+
+${needsDFTU ? `### DFT+U (Hubbard corrections)
+System contains strongly correlated elements: ${structureData.elements.filter(el => correlated.includes(el)).join(', ')}
+- **Hubbard U values**: Suggest element-specific U values from literature
+${structureData.elements.filter(el => correlated.includes(el)).map(el => `  * ${el}: U = ___ eV, J = ___ eV (cite source if possible)`).join('\n')}
+- **Formulation**: Simplified (Liechtenstein) or full?
+- **Literature values**: Reference recent papers for this material class` : ''}
+
+${needsVDW ? `### van der Waals Corrections
+System shows characteristics requiring vdW: ${is2D ? '2D layered structure' : 'contains vdW-active elements'}
+- **Recommended method**:
+  * DFT-D3 (Grimme): Fast, good for many systems
+  * vdW-DF family: More accurate but expensive
+  * rVV10 / vdW-DF2: Best for ${functional}
+- **Parameters**: Provide vdw_corr flag and any required parameters
+- **When to use**: Justify necessity for this system` : ''}
+
+${hasHeavyElements ? `### Spin-Orbit Coupling (SOC)
+Heavy elements detected: ${structureData.elements.filter(el => heavyElements.includes(el)).join(', ')}
+- **Need for SOC**: Assess if crucial for this system
+- **Fully-relativistic pseudopotentials**: Recommended or optional?
+- **Computational cost**: Estimate cost increase (typically 2-4x)
+- **When essential**: Band structure near Fermi level, topological properties` : ''}
+
+${hasTM ? `### Magnetism Considerations
+Transition metals present: ${structureData.elements.filter(el => transitionMetals.includes(el)).join(', ')}
+- **Initial magnetic moments**: Suggest starting_magnetization for each TM
+- **Spin-polarized calculation**: Recommended (nspin=2) or not?
+- **Antiferromagnetic ordering**: Consider if relevant` : ''}
+
+## 7. CALCULATION-SPECIFIC SETTINGS
+
+### For ${calcType.toUpperCase()}:
+${calcType === 'scf' ? `- SCF-specific tips
+- Mixing parameters for faster convergence
+- How to detect and fix SCF convergence issues` : ''}
+${calcType === 'relax' || calcType === 'vc-relax' ? `- Optimization algorithm: BFGS, damped dynamics, or other?
+- cell_dofree: ${calcType === 'vc-relax' ? 'all, or constrain specific directions?' : 'N/A'}
+- Maximum steps: Reasonable limit?
+- When to fix atomic positions or cell parameters?` : ''}
+${calcType === 'bands' ? `- How to generate k-path: Use XCrySDen, SeeK-path, or manually?
+- Number of k-points along path: ___ (typically 40-50 per segment)
+- High-symmetry points for this crystal system
+- Need for SOC in band structure?` : ''}
+${calcType === 'dos' ? `- DOS-specific k-mesh: Typically denser than SCF
+- Gaussian/tetrahedra broadening: Which method?
+- Energy range: Around Fermi level, ___ to ___ eV
+- PDOS: Project on atomic orbitals?` : ''}
+${calcType === 'nscf' ? `- Purpose: For bands, DOS, or charge density?
+- nbnd: Suggest number of bands (typically nelec/2 + 10 to 20)
+- Force hermiticity in Hamiltonian?` : ''}
+
+## 8. COMPUTATIONAL RESOURCES
+- **Parallelization strategy**:
+  * K-point pools: Suggest -nk value
+  * Plane-wave parallelization: -ndiag value if needed
+- **Expected computational cost**: Rough estimate (light/moderate/heavy)
+- **Memory requirements**: Estimate per processor (GB)
+- **Recommended resources**: Number of cores, walltime estimate
+
+## 9. QUALITY CHECKS & VALIDATION
+- **Convergence tests to perform**:
+  1. K-points: [__, __, __]
+  2. Ecutwfc: [__, __, __] Ry
+  3. Smearing/degauss: Test if significant
+- **Physical consistency checks**:
+  * Energy/atom should be ~ -100 to -200 eV range
+  * Forces in relaxation should decrease monotonically
+  * Lattice parameters should match experiments ±2-3%
+- **Common pitfalls for this system**:
+  * List 2-3 potential issues specific to ${structureData.formula}
+
+## 10. REFERENCES & FURTHER READING
+- **Relevant papers**: Cite 1-2 key papers for similar systems/calculations
+- **Computational details**: Where to find more information
+- **Pseudopotential validation**: Link to SSSP/PseudoDojo documentation
+
+---
+
+**FORMAT YOUR RESPONSE**: Use clear markdown with headers, bullet points, specific numerical values, and brief justifications. Be quantitative, not vague. Cite typical values from recent literature (2018-2024) when possible.`;
 
       // Call Lambda backend (API keys are stored securely on server)
       const response = await fetch('https://b0q9fbz7nl.execute-api.us-east-1.amazonaws.com/prod/dft-advice', {
