@@ -33,29 +33,157 @@ export const METALS: MetalEntry[] = [
 ];
 
 // === Monolayer Material Presets ===
+// Fractional coordinates for 2D materials. z ~0.5 places atoms in middle of vacuum slab.
 
 export const MONOLAYER_PRESETS: MonolayerMaterial[] = [
   // Hexagonal monolayers (a = b, gamma = 120)
-  { name: 'hBN',          a: 2.504, b: 2.504, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'Graphene',     a: 2.461, b: 2.461, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'MoS2',         a: 3.160, b: 3.160, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal' },
-  { name: 'MoSe2',        a: 3.289, b: 3.289, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal' },
-  { name: 'WS2',          a: 3.153, b: 3.153, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal' },
-  { name: 'WSe2',         a: 3.282, b: 3.282, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal' },
-  { name: 'Silicene',     a: 3.866, b: 3.866, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'Germanene',    a: 4.063, b: 4.063, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'Stanene',      a: 4.670, b: 4.670, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'Borophene',    a: 2.866, b: 2.866, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'GaSe',         a: 3.755, b: 3.755, gamma: 120, atoms_per_cell: 4, crystal_system: 'hexagonal' },
-  { name: 'InSe',         a: 4.002, b: 4.002, gamma: 120, atoms_per_cell: 4, crystal_system: 'hexagonal' },
-  { name: 'h-BAs',        a: 3.385, b: 3.385, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal' },
-  { name: 'Bi2Se3 (QL)',  a: 4.138, b: 4.138, gamma: 120, atoms_per_cell: 5, crystal_system: 'hexagonal' },
+  {
+    name: 'hBN', a: 2.504, b: 2.504, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'B', x: 0, y: 0, z: 0.5 },
+      { symbol: 'N', x: 1/3, y: 2/3, z: 0.5 },
+    ]
+  },
+  {
+    name: 'Graphene', a: 2.461, b: 2.461, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'C', x: 0, y: 0, z: 0.5 },
+      { symbol: 'C', x: 1/3, y: 2/3, z: 0.5 },
+    ]
+  },
+  {
+    name: 'MoS2', a: 3.160, b: 3.160, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Mo', x: 0, y: 0, z: 0.5 },
+      { symbol: 'S', x: 1/3, y: 2/3, z: 0.41 },
+      { symbol: 'S', x: 1/3, y: 2/3, z: 0.59 },
+    ]
+  },
+  {
+    name: 'MoSe2', a: 3.289, b: 3.289, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Mo', x: 0, y: 0, z: 0.5 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.40 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.60 },
+    ]
+  },
+  {
+    name: 'WS2', a: 3.153, b: 3.153, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'W', x: 0, y: 0, z: 0.5 },
+      { symbol: 'S', x: 1/3, y: 2/3, z: 0.41 },
+      { symbol: 'S', x: 1/3, y: 2/3, z: 0.59 },
+    ]
+  },
+  {
+    name: 'WSe2', a: 3.282, b: 3.282, gamma: 120, atoms_per_cell: 3, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'W', x: 0, y: 0, z: 0.5 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.40 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.60 },
+    ]
+  },
+  {
+    name: 'Silicene', a: 3.866, b: 3.866, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Si', x: 0, y: 0, z: 0.48 },
+      { symbol: 'Si', x: 1/3, y: 2/3, z: 0.52 },  // buckled
+    ]
+  },
+  {
+    name: 'Germanene', a: 4.063, b: 4.063, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Ge', x: 0, y: 0, z: 0.47 },
+      { symbol: 'Ge', x: 1/3, y: 2/3, z: 0.53 },  // buckled
+    ]
+  },
+  {
+    name: 'Stanene', a: 4.670, b: 4.670, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Sn', x: 0, y: 0, z: 0.46 },
+      { symbol: 'Sn', x: 1/3, y: 2/3, z: 0.54 },  // buckled
+    ]
+  },
+  {
+    name: 'Borophene', a: 2.866, b: 2.866, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'B', x: 0, y: 0, z: 0.5 },
+      { symbol: 'B', x: 1/3, y: 2/3, z: 0.5 },
+    ]
+  },
+  {
+    name: 'GaSe', a: 3.755, b: 3.755, gamma: 120, atoms_per_cell: 4, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Ga', x: 0, y: 0, z: 0.45 },
+      { symbol: 'Ga', x: 1/3, y: 2/3, z: 0.55 },
+      { symbol: 'Se', x: 0, y: 0, z: 0.38 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.62 },
+    ]
+  },
+  {
+    name: 'InSe', a: 4.002, b: 4.002, gamma: 120, atoms_per_cell: 4, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'In', x: 0, y: 0, z: 0.45 },
+      { symbol: 'In', x: 1/3, y: 2/3, z: 0.55 },
+      { symbol: 'Se', x: 0, y: 0, z: 0.38 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.62 },
+    ]
+  },
+  {
+    name: 'h-BAs', a: 3.385, b: 3.385, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'B', x: 0, y: 0, z: 0.5 },
+      { symbol: 'As', x: 1/3, y: 2/3, z: 0.5 },
+    ]
+  },
+  {
+    name: 'Bi2Se3 (QL)', a: 4.138, b: 4.138, gamma: 120, atoms_per_cell: 5, crystal_system: 'hexagonal',
+    baseAtoms: [
+      { symbol: 'Bi', x: 0, y: 0, z: 0.40 },
+      { symbol: 'Bi', x: 0, y: 0, z: 0.60 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.33 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.50 },
+      { symbol: 'Se', x: 1/3, y: 2/3, z: 0.67 },
+    ]
+  },
 
   // Rectangular monolayers (gamma = 90)
-  { name: 'Phosphorene',  a: 3.314, b: 4.376, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular' },
-  { name: 'GeS',          a: 3.640, b: 4.299, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular' },
-  { name: 'SnS',          a: 3.980, b: 4.340, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular' },
-  { name: 'SnSe',         a: 4.190, b: 4.530, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular' },
+  {
+    name: 'Phosphorene', a: 3.314, b: 4.376, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular',
+    baseAtoms: [
+      { symbol: 'P', x: 0.00, y: 0.08, z: 0.45 },
+      { symbol: 'P', x: 0.50, y: 0.42, z: 0.45 },
+      { symbol: 'P', x: 0.00, y: 0.58, z: 0.55 },
+      { symbol: 'P', x: 0.50, y: 0.92, z: 0.55 },
+    ]
+  },
+  {
+    name: 'GeS', a: 3.640, b: 4.299, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular',
+    baseAtoms: [
+      { symbol: 'Ge', x: 0.00, y: 0.12, z: 0.45 },
+      { symbol: 'Ge', x: 0.50, y: 0.38, z: 0.55 },
+      { symbol: 'S', x: 0.00, y: 0.62, z: 0.45 },
+      { symbol: 'S', x: 0.50, y: 0.88, z: 0.55 },
+    ]
+  },
+  {
+    name: 'SnS', a: 3.980, b: 4.340, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular',
+    baseAtoms: [
+      { symbol: 'Sn', x: 0.00, y: 0.12, z: 0.45 },
+      { symbol: 'Sn', x: 0.50, y: 0.38, z: 0.55 },
+      { symbol: 'S', x: 0.00, y: 0.62, z: 0.45 },
+      { symbol: 'S', x: 0.50, y: 0.88, z: 0.55 },
+    ]
+  },
+  {
+    name: 'SnSe', a: 4.190, b: 4.530, gamma: 90, atoms_per_cell: 4, crystal_system: 'rectangular',
+    baseAtoms: [
+      { symbol: 'Sn', x: 0.00, y: 0.12, z: 0.45 },
+      { symbol: 'Sn', x: 0.50, y: 0.38, z: 0.55 },
+      { symbol: 'Se', x: 0.00, y: 0.62, z: 0.45 },
+      { symbol: 'Se', x: 0.50, y: 0.88, z: 0.55 },
+    ]
+  },
 ];
 
 export function getMetalBySymbol(symbol: string): MetalEntry | undefined {

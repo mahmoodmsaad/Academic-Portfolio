@@ -328,37 +328,104 @@ const MatrixOptimizer: React.FC = () => {
   const downloadMonolayerCIF = (result: MatrixResult, targetLabel: string) => {
     if (!monolayer) return;
     const [n, m, k, l] = result.matrix;
+    const det = n * l - m * k;
+    const absDet = Math.abs(det);
 
-    // Build a minimal CIF with the achieved supercell lattice parameters
+    // Generate supercell atoms from base atoms using transformation matrix
+    // Transform: (fx', fy') = M^(-1) * (fx + i, fy + j) where M^(-1) = (1/det) * [l, -m; -k, n]
+    const supercellAtoms: { symbol: string; x: number; y: number; z: number }[] = [];
+
+    // Get base atoms (or use defaults if not defined)
+    const baseAtoms = monolayer.baseAtoms || [
+      { symbol: 'X', x: 0, y: 0, z: 0.5 },
+      { symbol: 'X', x: 1/3, y: 2/3, z: 0.5 },
+    ];
+
+    // Search range for tiling - need to cover all integer offsets that map into [0,1) in supercell
+    const searchRange = Math.max(Math.abs(n), Math.abs(m), Math.abs(k), Math.abs(l)) + 2;
+
+    for (let i = -searchRange; i <= searchRange; i++) {
+      for (let j = -searchRange; j <= searchRange; j++) {
+        for (const atom of baseAtoms) {
+          // Original fractional coords with offset
+          const ox = atom.x + i;
+          const oy = atom.y + j;
+
+          // Transform to supercell fractional coordinates
+          const fx = (l * ox - m * oy) / det;
+          const fy = (-k * ox + n * oy) / det;
+
+          // Wrap to [0, 1) with tolerance
+          const eps = 1e-6;
+          let wrappedX = fx - Math.floor(fx + eps);
+          let wrappedY = fy - Math.floor(fy + eps);
+          if (wrappedX < 0) wrappedX += 1;
+          if (wrappedY < 0) wrappedY += 1;
+          if (wrappedX >= 1 - eps) wrappedX = 0;
+          if (wrappedY >= 1 - eps) wrappedY = 0;
+
+          // Check if this atom is inside the supercell [0, 1)
+          if (wrappedX >= -eps && wrappedX < 1 - eps && wrappedY >= -eps && wrappedY < 1 - eps) {
+            // Check for duplicates
+            const isDuplicate = supercellAtoms.some(a =>
+              a.symbol === atom.symbol &&
+              Math.abs(a.x - wrappedX) < 0.01 &&
+              Math.abs(a.y - wrappedY) < 0.01 &&
+              Math.abs(a.z - atom.z) < 0.01
+            );
+            if (!isDuplicate) {
+              supercellAtoms.push({ symbol: atom.symbol, x: wrappedX, y: wrappedY, z: atom.z });
+            }
+          }
+        }
+      }
+    }
+
+    // Build atom lines for CIF
+    const atomLines: string[] = [];
+    const atomCounts: Record<string, number> = {};
+    for (const atom of supercellAtoms) {
+      atomCounts[atom.symbol] = (atomCounts[atom.symbol] || 0) + 1;
+      const label = `${atom.symbol}${atomCounts[atom.symbol]}`;
+      atomLines.push(`  ${label.padEnd(6)} ${atom.symbol.padEnd(4)} 1.0  ${atom.x.toFixed(5)}  ${atom.y.toFixed(5)}  ${atom.z.toFixed(5)}  1.0000`);
+    }
+
+    // Build formula
+    const formula = Object.entries(atomCounts).map(([sym, cnt]) => `${sym}${cnt}`).join('');
+
     const cif = [
-      `data_${monolayer.name}_supercell_${targetLabel.replace(/[^a-zA-Z0-9]/g, '_')}`,
-      `_cell_length_a    ${result.achieved_a.toFixed(6)}`,
-      `_cell_length_b    ${result.achieved_b.toFixed(6)}`,
-      `_cell_length_c    20.000000`,
-      `_cell_angle_alpha 90.0000`,
-      `_cell_angle_beta  90.0000`,
-      `_cell_angle_gamma ${result.achieved_gamma.toFixed(4)}`,
-      `_symmetry_space_group_name_H-M 'P 1'`,
-      `_symmetry_Int_Tables_number    1`,
+      `data_${monolayer.name}_supercell`,
+      `_chemical_formula_structural       ${formula}`,
+      `_chemical_formula_sum              "${Object.entries(atomCounts).map(([s, c]) => `${s}${c}`).join(' ')}"`,
+      `_cell_length_a       ${result.achieved_a.toFixed(6)}`,
+      `_cell_length_b       ${result.achieved_b.toFixed(6)}`,
+      `_cell_length_c       20.000000`,
+      `_cell_angle_alpha    90.0000`,
+      `_cell_angle_beta     90.0000`,
+      `_cell_angle_gamma    ${result.achieved_gamma.toFixed(4)}`,
       ``,
-      `# Supercell transformation matrix:`,
-      `# | ${n}  ${m}  0 |`,
-      `# | ${k}  ${l}  0 |`,
-      `# | 0  0  1 |`,
-      `# Determinant: ${Math.abs(n * l - m * k)}`,
+      `_space_group_name_H-M_alt    "P 1"`,
+      `_space_group_IT_number       1`,
+      ``,
+      `# Supercell transformation matrix: [${n},${m}|${k},${l}]`,
+      `# Determinant: ${absDet}`,
       `# Monolayer: ${monolayer.name} (a=${monolayer.a}, b=${monolayer.b}, gamma=${monolayer.gamma})`,
+      `# Target surface: ${activeElement}(${millerH}${millerK}${millerL}) ${targetLabel}`,
       `# Error: a=${result.error_a_pct.toFixed(2)}%, b=${result.error_b_pct.toFixed(2)}%, gamma=${result.error_gamma_pct.toFixed(2)}%`,
-      `# Atoms in supercell: ${result.atom_count}`,
-      `# Target: ${targetLabel}`,
-      `# Surface: ${activeElement}(${millerH}${millerK}${millerL})`,
       ``,
       `loop_`,
-      `_atom_site_label`,
-      `_atom_site_type_symbol`,
-      `_atom_site_fract_x`,
-      `_atom_site_fract_y`,
-      `_atom_site_fract_z`,
-      `X1 X 0.00000 0.00000 0.00000`,
+      `  _space_group_symop_operation_xyz`,
+      `  'x, y, z'`,
+      ``,
+      `loop_`,
+      `  _atom_site_label`,
+      `  _atom_site_type_symbol`,
+      `  _atom_site_symmetry_multiplicity`,
+      `  _atom_site_fract_x`,
+      `  _atom_site_fract_y`,
+      `  _atom_site_fract_z`,
+      `  _atom_site_occupancy`,
+      ...atomLines,
     ].join('\n');
 
     const blob = new Blob([cif], { type: 'chemical/x-cif' });

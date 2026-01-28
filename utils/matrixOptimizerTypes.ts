@@ -23,6 +23,14 @@ export interface SurfaceCellParams {
   cif?: string; // CIF file content from ASE (metal surface slab)
 }
 
+// Base atom in a unit cell (fractional coordinates)
+export interface BaseAtom {
+  symbol: string;  // Element symbol (e.g., 'C', 'Si', 'Mo', 'S')
+  x: number;       // Fractional x (0-1)
+  y: number;       // Fractional y (0-1)
+  z: number;       // Fractional z (typically 0.5 for 2D)
+}
+
 // Monolayer material definition
 export interface MonolayerMaterial {
   name: string;
@@ -31,6 +39,7 @@ export interface MonolayerMaterial {
   gamma: number; // degrees
   atoms_per_cell: number;
   crystal_system: CrystalSystem;
+  baseAtoms?: BaseAtom[]; // Atomic positions in fractional coordinates
 }
 
 // Single optimization result
