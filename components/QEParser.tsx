@@ -426,7 +426,24 @@ const QEParser: React.FC = () => {
       const vdwMaterials = ['C', 'B', 'N', 'S', 'Se', 'Te'];
       const needsVDW = is2D || structureData.elements.some(el => vdwMaterials.includes(el));
 
-      const prompt = `You are an expert computational materials scientist. Provide detailed, research-quality DFT calculation recommendations for Quantum ESPRESSO.
+      const prompt = `You are an expert computational materials scientist with full internet access to research databases, papers, and computational resources. Provide detailed, research-quality DFT calculation recommendations for Quantum ESPRESSO based on EXTENSIVE WEB RESEARCH.
+
+# 🔬 CRITICAL RESEARCH INSTRUCTIONS - USE YOUR WEB SEARCH CAPABILITIES
+
+**IMPORTANT**: This requires THOROUGH, DEEP RESEARCH using multiple web searches. You MUST:
+
+1. **Search Recent Literature (2020-2024)**: Find at least 3-5 recent papers on ${structureData.formula} or similar ${structureData.elements.join('-')} compounds
+2. **Database Lookup**: Access SSSP efficiency/precision and PseudoDojo databases for exact pseudopotential specifications
+3. **Cross-Reference Sources**: Verify computational parameters across multiple high-quality publications (Nature, PRB, JPCM, Comp. Mat. Sci.)
+4. **Material-Class Analysis**: Research typical DFT settings for this material class (${is2D ? 'layered 2D materials' : '3D bulk structures'}, ${hasTM ? 'transition metal compounds' : 'main group compounds'})
+5. **Convergence Studies**: Find published convergence tests for similar systems
+6. **Expert Validation**: Cross-check recommended values with established computational materials science practices
+
+**Time Investment**: Spend 60-120 seconds on comprehensive research. This is production research work, not a quick answer.
+
+**Quality Standard**: Your recommendations should be publication-ready, with specific citations where possible.
+
+---
 
 # SYSTEM INFORMATION
 
@@ -577,9 +594,38 @@ ${calcType === 'nscf' ? `- Purpose: For bands, DOS, or charge density?
 
 ---
 
-**FORMAT YOUR RESPONSE**: Use clear markdown with headers, bullet points, specific numerical values, and brief justifications. Be quantitative, not vague. Cite typical values from recent literature (2018-2024) when possible.`;
+---
+
+# 📚 RESEARCH METHODOLOGY & OUTPUT FORMAT
+
+## Before You Start Writing:
+1. ✅ Search for "${structureData.formula}" or "${structureData.elements.join('-')}" compounds in recent DFT literature
+2. ✅ Look up each element (${structureData.elements.join(', ')}) in SSSP/PseudoDojo databases for exact cutoff requirements
+3. ✅ Find 2-3 papers with similar calculations (${calcType}, ${functional})
+4. ✅ Verify k-point density guidelines from Materials Project / computational best practices
+5. ✅ Check for element-specific considerations (magnetism, +U, SOC, vdW)
+
+## Output Requirements:
+- **Use SPECIFIC VALUES with SOURCES**: Instead of "~60 Ry", write "65 Ry (Mo: 60 Ry from SSSP efficiency v1.3 + 20% safety margin)"
+- **Cite Literature**: Reference papers by first author and year, e.g., "(Cococcioni PRB 2005)" or "(Materials Project database)"
+- **Show Reasoning**: Explain WHY each parameter is chosen
+- **Provide Ranges for Testing**: Give 3 values to test convergence: [conservative, recommended, tight]
+- **Material-Specific**: Tailor all advice to ${structureData.formula}, not generic guidance
+- **Quantitative**: Use numbers, not vague terms like "appropriate" or "reasonable"
+
+## Format:
+- Clear markdown with ## headers for each section
+- Bullet points with specific numerical values
+- **Bold** for important parameters
+- Code blocks for example input file snippets
+- Tables for comparing options when relevant
+
+**MINIMUM RESEARCH TIME**: 60-90 seconds of thorough investigation before responding.
+
+**GOAL**: Provide recommendations that a PhD student or postdoc could use directly in a high-impact research paper.`;
 
       // Call Lambda backend (API keys are stored securely on server)
+      // Note: Deep research mode - expect 60-120 second response time for thorough analysis
       const response = await fetch('https://b0q9fbz7nl.execute-api.us-east-1.amazonaws.com/prod/dft-advice', {
         method: 'POST',
         headers: {
@@ -883,15 +929,16 @@ ${calcType === 'nscf' ? `- Purpose: For bands, DOS, or charge density?
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold text-slate-900">DFT Setup Assistant</h3>
-                  <p className="text-slate-600">AI-powered parameter recommendations using Perplexity</p>
+                  <p className="text-slate-600">AI-powered deep research for production-ready DFT parameters</p>
                 </div>
               </div>
 
               <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-4 mb-6 flex gap-3">
                 <Zap className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-purple-800">
-                  <strong>Powered by Perplexity AI:</strong> Get intelligent recommendations for k-points, cutoff energies, 
-                  pseudopotentials, convergence parameters, and element-specific settings based on your structure.
+                  <strong>🔬 Deep Research Mode (60-90s):</strong> AI performs comprehensive literature search, database lookups (SSSP/PseudoDojo),
+                  and cross-references multiple sources to provide publication-quality recommendations for k-points, cutoff energies,
+                  pseudopotentials, DFT+U, vdW corrections, and convergence parameters tailored to your exact material.
                 </div>
               </div>
 
@@ -1037,12 +1084,12 @@ ${calcType === 'nscf' ? `- Purpose: For bands, DOS, or charge density?
                 {isDftProcessing ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Getting {aiProvider === 'deepseek' ? 'DeepSeek' : 'Perplexity'} Recommendations...
+                    Deep Research in Progress (~60-90s)... {aiProvider === 'deepseek' ? 'DeepSeek' : 'Perplexity'} is analyzing literature & databases
                   </>
                 ) : (
                   <>
                     <Brain className="w-5 h-5" />
-                    Get DFT Recommendations
+                    Get DFT Recommendations (Deep Research Mode)
                   </>
                 )}
               </button>
