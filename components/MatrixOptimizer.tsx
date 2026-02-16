@@ -11,8 +11,13 @@ import type {
   TargetResults, WorkerOutMessage, WorkerProgressMessage,
 } from '../utils/matrixOptimizerTypes';
 
-// ASE Lambda API endpoint (uses ASE Python for surface cell computation)
-const SURFACE_API_URL = 'https://oy34w61rc6.execute-api.us-east-1.amazonaws.com/prod/surface-targets';
+// Surface-target API endpoint (defaults to the hosted endpoint if env var is unset).
+// Optionally set VITE_SURFACE_API_PYMATGEN to route pymatgen requests to a separate endpoint.
+const DEFAULT_SURFACE_API_URL = 'https://oy34w61rc6.execute-api.us-east-1.amazonaws.com/prod/surface-targets';
+const configuredSurfaceApi = import.meta.env.VITE_SURFACE_API;
+const SURFACE_API_URL =
+  configuredSurfaceApi === undefined ? DEFAULT_SURFACE_API_URL : configuredSurfaceApi.trim();
+const SURFACE_API_PYMATGEN_URL = import.meta.env.VITE_SURFACE_API_PYMATGEN?.trim() || '';
 
 // === Tier badge colors ===
 const TIER_STYLES: Record<string, string> = {
@@ -51,6 +56,7 @@ const MatrixOptimizer: React.FC = () => {
   const [millerL, setMillerL] = useState(1);
   const [surfaceTargets, setSurfaceTargets] = useState<SurfaceCellParams[] | null>(null);
   const [surfaceError, setSurfaceError] = useState('');
+  const [surfaceBackendNote, setSurfaceBackendNote] = useState('');
   const [isComputingTargets, setIsComputingTargets] = useState(false);
   const [targetMethod, setTargetMethod] = useState<'ase' | 'pymatgen' | 'analytical' | null>(null);
   const [bulkInfo, setBulkInfo] = useState<Record<string, unknown> | null>(null);
@@ -95,6 +101,7 @@ const MatrixOptimizer: React.FC = () => {
   // === Step 1: Compute surface targets (ASE Lambda first, then JS fallback) ===
   const computeTargets = async () => {
     setSurfaceError('');
+    setSurfaceBackendNote('');
     setSurfaceTargets(null);
     setTargetMethod(null);
     setBulkInfo(null);
@@ -112,10 +119,15 @@ const MatrixOptimizer: React.FC = () => {
       return;
     }
 
-    // Try ASE Lambda API first
-    if (SURFACE_API_URL) {
+    const endpoint =
+      supercellBackend === 'pymatgen' && SURFACE_API_PYMATGEN_URL
+        ? SURFACE_API_PYMATGEN_URL
+        : SURFACE_API_URL;
+
+    // Try surface-target API first
+    if (endpoint) {
       try {
-        const response = await fetch(SURFACE_API_URL, {
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ element, h: millerH, k: millerK, l: millerL, backend: supercellBackend }),
@@ -128,8 +140,20 @@ const MatrixOptimizer: React.FC = () => {
 
         const data = await response.json();
         if (data.success && data.targets) {
+          const responseBackend =
+            data.backend === 'pymatgen' || data.backend === 'ase'
+              ? data.backend
+              : null;
+
           setSurfaceTargets(data.targets);
-          setTargetMethod(data.backend === 'pymatgen' ? 'pymatgen' : 'ase');
+          setTargetMethod(responseBackend ?? 'ase');
+          if (supercellBackend === 'pymatgen' && responseBackend !== 'pymatgen') {
+            if (responseBackend === 'ase') {
+              setSurfaceBackendNote('Pymatgen was selected, but the API responded with ASE. This endpoint appears ASE-only.');
+            } else {
+              setSurfaceBackendNote('Pymatgen was selected, but the API did not report backend information. This usually indicates an older ASE-only deployment.');
+            }
+          }
           if (data.bulk_info) setBulkInfo(data.bulk_info);
           setIsComputingTargets(false);
           return;
@@ -137,7 +161,7 @@ const MatrixOptimizer: React.FC = () => {
         throw new Error(data.error || 'Invalid API response');
       } catch (err) {
         // API failed — fall through to JS fallback
-        console.warn('ASE API unavailable, using analytical fallback:', err);
+        console.warn('Surface API unavailable, using analytical fallback:', err);
       }
     }
 
@@ -649,6 +673,12 @@ const MatrixOptimizer: React.FC = () => {
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex gap-3">
                     <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
                     <p className="text-sm text-red-800">{surfaceError}</p>
+                  </div>
+                )}
+                {surfaceBackendNote && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
+                    <Info className="w-5 h-5 text-amber-700 flex-shrink-0" />
+                    <p className="text-sm text-amber-900">{surfaceBackendNote}</p>
                   </div>
                 )}
 

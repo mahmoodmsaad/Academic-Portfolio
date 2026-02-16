@@ -156,7 +156,6 @@ def _handle_pymatgen(element, h, k, l):
     from pymatgen.core import Structure, Element
     from pymatgen.core.surface import SlabGenerator
     from pymatgen.io.cif import CifWriter
-    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
     # Validate element
     try:
