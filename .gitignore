@@ -21,10 +21,14 @@ studio/dist
 studio/.sanity
 
 # Lambda build artifacts
+lambda/package/
 lambda/surface_package/
 lambda/__pycache__/
 *.pyc
 lambda/*.zip
+
+# Claude Code
+.claude/
 
 # Editor directories and files
 .vscode/*

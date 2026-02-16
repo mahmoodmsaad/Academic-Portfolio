@@ -862,28 +862,161 @@ const QEParser: React.FC = () => {
       }
 
       const volumePerAtom = structureData.volume / structureData.numAtoms;
-      const prompt = `I need help setting up a Quantum ESPRESSO DFT calculation with these parameters:
 
-**Structure Information:**
-- Chemical formula: ${structureData.formula}
-- Elements present: ${structureData.elements.join(', ')}
-- Number of atoms: ${structureData.numAtoms}
-- Cell dimensions (Å): a=${structureData.cellParams.a.toFixed(3)}, b=${structureData.cellParams.b.toFixed(3)}, c=${structureData.cellParams.c.toFixed(3)}
-- Cell angles (°): α=${structureData.cellParams.alpha.toFixed(1)}, β=${structureData.cellParams.beta.toFixed(1)}, γ=${structureData.cellParams.gamma.toFixed(1)}
-- Volume per atom: ${volumePerAtom.toFixed(2)} Å³
+      // Detect system characteristics for better prompting
+      const { a, b, c } = structureData.cellParams;
+      const maxAxis = Math.max(a, b, c);
+      const minAxis = Math.min(a, b, c);
+      const is2D = maxAxis / minAxis > 3;
+      const heavyElements = ['Pt', 'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'W', 'Re', 'Os', 'Ir', 'Ta', 'Hf', 'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Ac', 'Th', 'Pa', 'U'];
+      const transitionMetals = ['Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd'];
+      const hasHeavyElements = structureData.elements.some(el => heavyElements.includes(el));
+      const hasTransitionMetals = structureData.elements.some(el => transitionMetals.includes(el));
+      const hasMagnetic = ['Fe', 'Co', 'Ni', 'Mn', 'Cr'].some(el => structureData.elements.includes(el));
 
-**Calculation Settings:**
-- Calculation type: ${calcType}
-- XC Functional: ${functional}
+      const systemType = is2D ? '2D material/slab' : 'bulk 3D material';
 
-Please provide specific recommendations for:
+      const prompt = `You are an expert computational materials scientist specializing in Density Functional Theory (DFT) calculations using Quantum ESPRESSO. I need COMPREHENSIVE and DETAILED guidance for setting up a calculation.
 
-1. **K-point grid**: Recommend optimal k-point mesh based on cell size and calculation type.
-2. **Cutoff energies**: Recommend ecutwfc and ecutrho values appropriate for the elements present.
-3. **Pseudopotentials**: Recommend specific pseudopotential types (NC, US, PAW) from SSSP or PseudoDojo.
-4. **Convergence parameters**: Suggest conv_thr for SCF, and forc_conv_thr/press_conv_thr for relaxations.
-5. **Smearing**: Recommend smearing type and degauss value based on material type.
-6. **Additional tips**: Element-specific considerations (DFT+U, SOC, vdW corrections).`;
+DO NOT SUMMARIZE. Provide EXTENSIVE, IN-DEPTH explanations for each section. Include specific numerical values, scientific reasoning, and literature-based recommendations where applicable.
+
+═══════════════════════════════════════════════════════════════
+STRUCTURE INFORMATION
+═══════════════════════════════════════════════════════════════
+• Chemical formula: ${structureData.formula}
+• Elements present: ${structureData.elements.join(', ')}
+• Number of atoms in cell: ${structureData.numAtoms}
+• Cell parameters:
+  - a = ${structureData.cellParams.a.toFixed(4)} Å
+  - b = ${structureData.cellParams.b.toFixed(4)} Å
+  - c = ${structureData.cellParams.c.toFixed(4)} Å
+  - α = ${structureData.cellParams.alpha.toFixed(2)}°
+  - β = ${structureData.cellParams.beta.toFixed(2)}°
+  - γ = ${structureData.cellParams.gamma.toFixed(2)}°
+• Cell volume: ${structureData.volume.toFixed(3)} Å³
+• Volume per atom: ${volumePerAtom.toFixed(3)} Å³
+• System type detected: ${systemType}
+${hasHeavyElements ? '• WARNING: Heavy elements detected - may require relativistic treatment (SOC)' : ''}
+${hasTransitionMetals ? '• NOTE: Transition metals present - consider DFT+U corrections' : ''}
+${hasMagnetic ? '• NOTE: Potentially magnetic elements detected - consider spin-polarized calculations' : ''}
+
+═══════════════════════════════════════════════════════════════
+CALCULATION SETTINGS
+═══════════════════════════════════════════════════════════════
+• Calculation type: ${calcType}
+• XC Functional requested: ${functional}
+
+═══════════════════════════════════════════════════════════════
+REQUIRED DETAILED ANALYSIS (Provide EXTENSIVE information for each)
+═══════════════════════════════════════════════════════════════
+
+1. **K-POINT MESH OPTIMIZATION** (Be very specific)
+   - Recommend exact k-point grid dimensions (e.g., 8×8×8)
+   - Explain the reasoning based on cell dimensions and reciprocal lattice
+   - Discuss k-point density (k-points per Å⁻¹) appropriate for this system
+   - For ${calcType} calculation: any special k-point considerations?
+   - If this is a metal vs insulator/semiconductor, how does that affect k-points?
+   - Provide convergence testing strategy with specific grids to test
+   ${is2D ? '- For this 2D/slab system: explain proper k-point sampling in periodic vs vacuum directions' : ''}
+
+2. **PLANE-WAVE CUTOFF ENERGIES** (Detailed element-by-element analysis)
+   For EACH element (${structureData.elements.join(', ')}):
+   - Recommended ecutwfc value and WHY
+   - Recommended ecutrho value (and ecutrho/ecutwfc ratio explanation)
+   - How the pseudopotential type affects these choices
+   - Provide a convergence testing protocol with specific values to test
+   - Final recommended values with safety margin
+
+3. **PSEUDOPOTENTIAL SELECTION** (Comprehensive recommendations)
+   For EACH element (${structureData.elements.join(', ')}):
+   - Recommend specific pseudopotential (give exact filename if possible)
+   - Compare NC vs US vs PAW: pros/cons for THIS specific element
+   - SSSP Efficiency vs SSSP Precision: which to use and why
+   - PseudoDojo considerations
+   - Scalar-relativistic vs fully-relativistic considerations
+   ${hasHeavyElements ? '- CRITICAL: Discuss relativistic effects and SOC pseudopotentials needed for heavy elements' : ''}
+   - Valence electron configuration to expect
+   - Any known issues or quirks with pseudopotentials for these elements
+
+4. **CONVERGENCE PARAMETERS** (Detailed thresholds)
+   - SCF convergence (conv_thr): recommend value with scientific justification
+   - For ${calcType}: specific convergence criteria needed
+   ${calcType === 'relax' || calcType === 'vc-relax' ? `
+   - Force convergence threshold (forc_conv_thr): specific value and reasoning
+   - Energy convergence for ionic steps
+   - Maximum ionic steps recommendation` : ''}
+   ${calcType === 'vc-relax' ? `
+   - Pressure convergence (press_conv_thr): specific value
+   - Cell dynamics considerations
+   - Constraints on cell shape if needed` : ''}
+   - Mixing parameters: mixing_beta, mixing_mode recommendations
+   - Electron_maxstep recommendation
+
+5. **SMEARING AND ELECTRONIC OCCUPATION**
+   - Recommend specific smearing type (gaussian, mp, mv, fd) with explanation
+   - Recommend degauss value (in Ry) with justification
+   - Is this system metallic, semiconducting, or insulating? How does that affect choice?
+   - Discussion of occupation scheme and its physical meaning
+   ${hasMagnetic ? '- For potentially magnetic system: spin-polarized considerations' : ''}
+
+6. **XC FUNCTIONAL ANALYSIS** (${functional})
+   - Is ${functional} appropriate for this material system? Why or why not?
+   - Expected accuracy for lattice parameters, band gaps, energetics
+   - Alternative functionals to consider and why
+   ${functional === 'PBE' || functional === 'PBEsol' ? '- Known limitations of GGA for this type of system' : ''}
+   ${functional === 'HSE' ? '- Hybrid functional parameters: screening parameter, exact exchange fraction' : ''}
+   ${functional === 'SCAN' || functional === 'r2SCAN' ? '- Meta-GGA specific considerations and computational cost' : ''}
+
+7. **ADVANCED CORRECTIONS AND PHYSICS**
+   ${hasTransitionMetals ? `
+   **DFT+U Corrections (CRITICAL for transition metals):**
+   - Recommend specific Hubbard U values for each transition metal
+   - U values from literature for ${structureData.elements.filter(el => transitionMetals.includes(el)).join(', ')}
+   - How to determine U self-consistently vs using literature values
+   - Impact on electronic structure and properties` : ''}
+
+   ${hasHeavyElements ? `
+   **Spin-Orbit Coupling (CRITICAL for heavy elements):**
+   - Is SOC necessary for ${structureData.elements.filter(el => heavyElements.includes(el)).join(', ')}?
+   - How to enable: noncolin, lspinorb parameters
+   - Computational cost increase expected
+   - Impact on band structure and properties` : ''}
+
+   **Van der Waals Corrections:**
+   - Is vdW correction needed for this system?
+   - Recommend specific scheme: DFT-D2, DFT-D3, vdW-DF, rVV10
+   - Input parameters for chosen vdW method
+
+   ${is2D ? `
+   **2D Material Specific:**
+   - Vacuum spacing: is current c-axis (${structureData.cellParams.c.toFixed(2)} Å) sufficient?
+   - Dipole corrections if needed
+   - assume_isolated considerations` : ''}
+
+   ${hasMagnetic ? `
+   **Magnetism:**
+   - Recommend starting_magnetization values for magnetic atoms
+   - nspin = 2 settings
+   - Expected magnetic ground state` : ''}
+
+8. **COMPUTATIONAL RESOURCES AND EFFICIENCY**
+   - Estimated memory requirements
+   - Parallelization recommendations (npool, nband, ntg)
+   - Disk space considerations
+   - Expected wall time estimates for this system size
+
+9. **COMMON PITFALLS AND TROUBLESHOOTING**
+   - What errors might occur with this specific system?
+   - How to diagnose SCF convergence issues
+   - Charge sloshing prevention for ${structureData.numAtoms > 50 ? 'large' : 'this'} system
+   - Symmetry considerations
+
+10. **RECOMMENDED CALCULATION WORKFLOW**
+    - Step-by-step protocol for this ${calcType} calculation
+    - What calculations should precede/follow this?
+    - Post-processing recommendations
+
+Provide your response in a well-organized format with clear headers and specific numerical recommendations. Be thorough and detailed - this is for a research calculation where accuracy matters.`;
 
       // Call Lambda backend (API keys are stored securely on server)
       const response = await fetch('https://b0q9fbz7nl.execute-api.us-east-1.amazonaws.com/prod/dft-advice', {
@@ -1196,8 +1329,9 @@ Please provide specific recommendations for:
               <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-4 mb-6 flex gap-3">
                 <Zap className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-purple-800">
-                  <strong>Powered by Perplexity AI:</strong> Get intelligent recommendations for k-points, cutoff energies, 
-                  pseudopotentials, convergence parameters, and element-specific settings based on your structure.
+                  <strong>Comprehensive DFT Analysis:</strong> Get in-depth, research-grade recommendations including
+                  k-point optimization, cutoff energies, pseudopotential selection, DFT+U parameters, SOC considerations,
+                  vdW corrections, convergence strategies, and element-specific guidance. Analysis may take 30-60 seconds for thorough results.
                 </div>
               </div>
 
@@ -1343,12 +1477,12 @@ Please provide specific recommendations for:
                 {isDftProcessing ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Getting {aiProvider === 'deepseek' ? 'DeepSeek' : 'Perplexity'} Recommendations...
+                    Performing Deep Analysis... (30-60 sec)
                   </>
                 ) : (
                   <>
                     <Brain className="w-5 h-5" />
-                    Get DFT Recommendations
+                    Get Comprehensive DFT Analysis
                   </>
                 )}
               </button>

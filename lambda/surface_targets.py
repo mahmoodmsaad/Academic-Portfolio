@@ -152,7 +152,14 @@ def _handle_ase(element, h, k, l):
 
 
 def _handle_pymatgen(element, h, k, l):
-    """Generate surface targets using Pymatgen backend."""
+    """
+    Generate surface targets using Pymatgen backend.
+
+    NOTE: Pymatgen's SlabGenerator may produce different surface cell orientations
+    compared to ASE's surface() function, especially for high-index surfaces.
+    Both are mathematically valid representations. We project lattice vectors onto
+    the x-y plane to extract true in-plane surface parameters.
+    """
     from pymatgen.core import Structure, Element
     from pymatgen.core.surface import SlabGenerator
     from pymatgen.io.cif import CifWriter
@@ -188,6 +195,7 @@ def _handle_pymatgen(element, h, k, l):
     }
 
     # Generate slab using SlabGenerator
+    # Try to match ASE's behavior by using non-primitive cell and in_unit_planes=False
     try:
         slabgen = SlabGenerator(
             struct,
@@ -195,8 +203,8 @@ def _handle_pymatgen(element, h, k, l):
             min_slab_size=1.0,   # minimal for parameter extraction
             min_vacuum_size=0.0,
             center_slab=False,
-            in_unit_planes=True,
-            primitive=True,
+            in_unit_planes=False,  # Changed from True to match ASE better
+            primitive=False,        # Changed from True to get conventional cell like ASE
         )
         slabs = slabgen.get_slabs(symmetrize=False)
         if not slabs:
@@ -206,9 +214,15 @@ def _handle_pymatgen(element, h, k, l):
         return error_response(400, f'Cannot create ({h}{k}{l}) surface for {element}: {str(e)}')
 
     # Extract in-plane lattice parameters from slab
+    # IMPORTANT: Pymatgen slabs may have tilted lattice vectors with non-zero z-components.
+    # We must project onto the x-y plane to get true in-plane surface parameters.
     slab_latt = slab.lattice
-    v1 = np.array(slab_latt.matrix[0])
-    v2 = np.array(slab_latt.matrix[1])
+    v1_3d = np.array(slab_latt.matrix[0])
+    v2_3d = np.array(slab_latt.matrix[1])
+
+    # Project vectors onto x-y plane (remove z-component)
+    v1 = np.array([v1_3d[0], v1_3d[1], 0.0])
+    v2 = np.array([v2_3d[0], v2_3d[1], 0.0])
 
     a = float(np.linalg.norm(v1))
     b = float(np.linalg.norm(v2))
@@ -229,8 +243,8 @@ def _handle_pymatgen(element, h, k, l):
             min_slab_size=8.0,
             min_vacuum_size=10.0,
             center_slab=True,
-            in_unit_planes=False,
-            primitive=True,
+            in_unit_planes=False,  # Match main slab generator
+            primitive=False,        # Match main slab generator
         )
         cif_slabs = slabgen_cif.get_slabs(symmetrize=False)
         slab_for_cif = cif_slabs[0] if cif_slabs else None
@@ -262,10 +276,12 @@ def _handle_pymatgen(element, h, k, l):
 
         targets.append(target)
 
-    # Surface vectors for reference
+    # Surface vectors for reference (projected in-plane vectors)
     surface_info = {
         'v1': [round(float(x), 6) for x in v1],
         'v2': [round(float(x), 6) for x in v2],
+        'v1_3d_original': [round(float(x), 6) for x in v1_3d],
+        'v2_3d_original': [round(float(x), 6) for x in v2_3d],
         'atoms_in_slab': len(slab),
     }
 

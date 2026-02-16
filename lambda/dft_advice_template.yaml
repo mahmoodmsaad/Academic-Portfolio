@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: DFT Advice Lambda - Comprehensive AI-powered DFT recommendations
+
+Globals:
+  Function:
+    Timeout: 90  # Extended timeout for comprehensive AI responses
+    MemorySize: 256
+
+Parameters:
+  PerplexityApiKey:
+    Type: String
+    Description: Perplexity AI API Key
+    NoEcho: true
+  DeepSeekApiKey:
+    Type: String
+    Description: DeepSeek API Key
+    NoEcho: true
+
+Resources:
+  DftAdviceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dft-advice
+      Handler: dft_advice.lambda_handler
+      Runtime: python3.11
+      CodeUri: .
+      Description: Provides comprehensive DFT calculation recommendations using AI
+      Environment:
+        Variables:
+          PERPLEXITY_API_KEY: !Ref PerplexityApiKey
+          DEEPSEEK_API_KEY: !Ref DeepSeekApiKey
+      Events:
+        DftAdviceApi:
+          Type: Api
+          Properties:
+            Path: /dft-advice
+            Method: POST
+            RestApiId: !Ref DftAdviceApiGateway
+        DftAdviceOptionsApi:
+          Type: Api
+          Properties:
+            Path: /dft-advice
+            Method: OPTIONS
+            RestApiId: !Ref DftAdviceApiGateway
+
+  DftAdviceApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'POST, OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  DftAdviceApi:
+    Description: API Gateway endpoint URL for DFT Advice function
+    Value: !Sub "https://${DftAdviceApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/dft-advice"
+  DftAdviceFunction:
+    Description: DFT Advice Lambda Function ARN
+    Value: !GetAtt DftAdviceFunction.Arn
