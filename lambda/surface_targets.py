@@ -213,26 +213,18 @@ def _handle_pymatgen(element, h, k, l):
     except Exception as e:
         return error_response(400, f'Cannot create ({h}{k}{l}) surface for {element}: {str(e)}')
 
-    # Extract in-plane lattice parameters from slab
-    # IMPORTANT: Pymatgen slabs may have tilted lattice vectors with non-zero z-components.
-    # We must project onto the x-y plane to get true in-plane surface parameters.
+    # Extract surface lattice parameters directly from slab lattice
+    # Use Pymatgen's own lattice properties (full 3D vectors) which correctly
+    # represent the surface cell. These match what you see in CIF viewers like
+    # Materials Studio or VESTA.
     slab_latt = slab.lattice
-    v1_3d = np.array(slab_latt.matrix[0])
-    v2_3d = np.array(slab_latt.matrix[1])
-
-    # Project vectors onto x-y plane (remove z-component)
-    v1 = np.array([v1_3d[0], v1_3d[1], 0.0])
-    v2 = np.array([v2_3d[0], v2_3d[1], 0.0])
-
-    a = float(np.linalg.norm(v1))
-    b = float(np.linalg.norm(v2))
+    a = float(slab_latt.a)
+    b = float(slab_latt.b)
+    gamma = float(slab_latt.gamma)
 
     if a < 1e-6 or b < 1e-6:
         return error_response(400, f'Surface vectors too small for ({h}{k}{l}).')
 
-    cos_gamma = float(np.dot(v1, v2) / (a * b))
-    cos_gamma = max(-1.0, min(1.0, cos_gamma))
-    gamma = float(np.degrees(np.arccos(cos_gamma)))
     area = float(a * b * np.sin(np.radians(gamma)))
 
     # Generate thicker slab for CIF export (4-layer equivalent)
@@ -276,12 +268,10 @@ def _handle_pymatgen(element, h, k, l):
 
         targets.append(target)
 
-    # Surface vectors for reference (projected in-plane vectors)
+    # Surface vectors for reference
     surface_info = {
-        'v1': [round(float(x), 6) for x in v1],
-        'v2': [round(float(x), 6) for x in v2],
-        'v1_3d_original': [round(float(x), 6) for x in v1_3d],
-        'v2_3d_original': [round(float(x), 6) for x in v2_3d],
+        'v1': [round(float(x), 6) for x in slab_latt.matrix[0]],
+        'v2': [round(float(x), 6) for x in slab_latt.matrix[1]],
         'atoms_in_slab': len(slab),
     }
 
