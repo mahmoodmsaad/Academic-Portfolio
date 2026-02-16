@@ -52,8 +52,9 @@ const MatrixOptimizer: React.FC = () => {
   const [surfaceTargets, setSurfaceTargets] = useState<SurfaceCellParams[] | null>(null);
   const [surfaceError, setSurfaceError] = useState('');
   const [isComputingTargets, setIsComputingTargets] = useState(false);
-  const [targetMethod, setTargetMethod] = useState<'ase' | 'analytical' | null>(null);
+  const [targetMethod, setTargetMethod] = useState<'ase' | 'pymatgen' | 'analytical' | null>(null);
   const [bulkInfo, setBulkInfo] = useState<Record<string, unknown> | null>(null);
+  const [supercellBackend, setSupercellBackend] = useState<'ase' | 'pymatgen'>('ase');
 
   // === Step 2: Monolayer ===
   const [monolayerMode, setMonolayerMode] = useState<'preset' | 'custom' | 'cif'>('preset');
@@ -117,7 +118,7 @@ const MatrixOptimizer: React.FC = () => {
         const response = await fetch(SURFACE_API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ element, h: millerH, k: millerK, l: millerL }),
+          body: JSON.stringify({ element, h: millerH, k: millerK, l: millerL, backend: supercellBackend }),
         });
 
         if (!response.ok) {
@@ -128,7 +129,7 @@ const MatrixOptimizer: React.FC = () => {
         const data = await response.json();
         if (data.success && data.targets) {
           setSurfaceTargets(data.targets);
-          setTargetMethod('ase');
+          setTargetMethod(data.backend === 'pymatgen' ? 'pymatgen' : 'ase');
           if (data.bulk_info) setBulkInfo(data.bulk_info);
           setIsComputingTargets(false);
           return;
@@ -279,7 +280,7 @@ const MatrixOptimizer: React.FC = () => {
     text += `${'='.repeat(60)}\n`;
     text += `Element: ${activeElement}\n`;
     text += `Surface: (${millerH}${millerK}${millerL})\n`;
-    text += `Target method: ${targetMethod === 'ase' ? 'ASE (Atomic Simulation Environment)' : 'Analytical'}\n`;
+    text += `Target method: ${targetMethod === 'ase' ? 'ASE (Atomic Simulation Environment)' : targetMethod === 'pymatgen' ? 'Pymatgen (Python Materials Genomics)' : 'Analytical'}\n`;
     text += `Monolayer: ${monolayer?.name} (a=${monolayer?.a}, b=${monolayer?.b}, gamma=${monolayer?.gamma})\n`;
     text += `Date: ${new Date().toISOString()}\n\n`;
 
@@ -577,6 +578,27 @@ const MatrixOptimizer: React.FC = () => {
                   )}
                 </div>
 
+                {/* Backend Selector */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Supercell Backend</label>
+                  <div className="flex gap-2">
+                    {([['ase', 'ASE', 'Atomic Simulation Environment'], ['pymatgen', 'Pymatgen', 'Python Materials Genomics']] as const).map(([id, label, desc]) => (
+                      <button
+                        key={id}
+                        onClick={() => { setSupercellBackend(id); setSurfaceTargets(null); }}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors border-2 ${
+                          supercellBackend === id
+                            ? 'border-academic-500 bg-academic-50 text-academic-700'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="font-semibold">{label}</span>
+                        <span className="block text-xs text-slate-500 mt-0.5">{desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Miller Indices */}
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -612,7 +634,7 @@ const MatrixOptimizer: React.FC = () => {
                   {isComputingTargets ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      Computing via ASE...
+                      Computing via {supercellBackend === 'pymatgen' ? 'Pymatgen' : 'ASE'}...
                     </>
                   ) : (
                     <>
@@ -641,9 +663,11 @@ const MatrixOptimizer: React.FC = () => {
                         <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${
                           targetMethod === 'ase'
                             ? 'bg-green-100 text-green-800 border-green-300'
+                            : targetMethod === 'pymatgen'
+                            ? 'bg-purple-100 text-purple-800 border-purple-300'
                             : 'bg-amber-100 text-amber-800 border-amber-300'
                         }`}>
-                          {targetMethod === 'ase' ? 'ASE (Python)' : 'Analytical (JS fallback)'}
+                          {targetMethod === 'ase' ? 'ASE (Python)' : targetMethod === 'pymatgen' ? 'Pymatgen (Python)' : 'Analytical (JS fallback)'}
                         </span>
                       )}
                     </div>
