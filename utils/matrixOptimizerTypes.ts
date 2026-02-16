@@ -71,6 +71,7 @@ export interface WorkerStartMessage {
     monolayer: MonolayerMaterial;
     duration_ms: number;
     scan_limit: number;
+    target_method?: 'ase' | 'pymatgen' | 'analytical' | null;
   };
 }
 

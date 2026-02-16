@@ -40,11 +40,13 @@ function runOptimization(config: {
   monolayer: MonolayerMaterial;
   duration_ms: number;
   scan_limit: number;
+  target_method?: 'ase' | 'pymatgen' | 'analytical' | null;
 }) {
   const { targets, monolayer, duration_ms } = config;
   const startTime = performance.now();
   const endTime = startTime + duration_ms;
   let totalTested = 0;
+  const useSupplementaryAngleMatching = config.target_method === 'pymatgen';
 
   // Per-target result storage (keep top 50 rolling)
   const bestResults = new Map<string, MatrixResult[]>();
@@ -74,6 +76,113 @@ function runOptimization(config: {
   let lastProgressTime = startTime;
   let progressCounter = 0;
 
+  function gammaDeltaDeg(g1: number, g2: number): number {
+    const direct = Math.abs(g1 - g2);
+    if (!useSupplementaryAngleMatching) return direct;
+    const supplementary = Math.abs((180 - g1) - g2);
+    return Math.min(direct, supplementary);
+  }
+
+  function matrixTuple(
+    n: number,
+    m: number,
+    k: number,
+    l: number
+  ): [number, number, number, number] {
+    const nz = (v: number) => (v === 0 ? 0 : v);
+    return [nz(n), nz(m), nz(k), nz(l)];
+  }
+
+  type MatchCandidate = {
+    matrix: [number, number, number, number];
+    achieved_a: number;
+    achieved_b: number;
+    achieved_gamma: number;
+    error_a_pct: number;
+    error_b_pct: number;
+    error_gamma_pct: number;
+    score_proxy: number;
+    strict_gamma_delta: number;
+  };
+
+  function buildCandidate(
+    matrix: [number, number, number, number],
+    achievedA: number,
+    achievedB: number,
+    achievedGamma: number,
+    target: SurfaceCellParams
+  ): MatchCandidate {
+    const error_a_pct = Math.abs(achievedA - target.a) / target.a * 100;
+    const error_b_pct = Math.abs(achievedB - target.b) / target.b * 100;
+    const error_gamma_pct = gammaDeltaDeg(achievedGamma, target.gamma) / target.gamma * 100;
+    const score_proxy = error_a_pct + error_b_pct + 1.5 * error_gamma_pct;
+    const strict_gamma_delta = Math.abs(achievedGamma - target.gamma);
+
+    return {
+      matrix,
+      achieved_a: achievedA,
+      achieved_b: achievedB,
+      achieved_gamma: achievedGamma,
+      error_a_pct,
+      error_b_pct,
+      error_gamma_pct,
+      score_proxy,
+      strict_gamma_delta,
+    };
+  }
+
+  function selectBestMatch(
+    n: number,
+    m: number,
+    k: number,
+    l: number,
+    aSuper: number,
+    bSuper: number,
+    gammaSuper: number,
+    target: SurfaceCellParams
+  ): {
+    matrix: [number, number, number, number];
+    achieved_a: number;
+    achieved_b: number;
+    achieved_gamma: number;
+    error_a_pct: number;
+    error_b_pct: number;
+    error_gamma_pct: number;
+  } {
+    const direct = buildCandidate(matrixTuple(n, m, k, l), aSuper, bSuper, gammaSuper, target);
+
+    // Keep ASE/analytical behavior strict and unchanged.
+    if (!useSupplementaryAngleMatching) {
+      return direct;
+    }
+
+    const gammaComplement = 180 - gammaSuper;
+    const candidates: MatchCandidate[] = [
+      direct,
+      // Swap basis vectors to match alternative target-cell axis ordering.
+      buildCandidate(matrixTuple(k, l, n, m), bSuper, aSuper, gammaSuper, target),
+      // Flip one basis vector to map gamma <-> (180-gamma) while preserving area.
+      buildCandidate(matrixTuple(n, m, -k, -l), aSuper, bSuper, gammaComplement, target),
+      buildCandidate(matrixTuple(k, l, -n, -m), bSuper, aSuper, gammaComplement, target),
+    ];
+
+    let best = candidates[0];
+    for (let i = 1; i < candidates.length; i++) {
+      const cand = candidates[i];
+      const scoreDiff = cand.score_proxy - best.score_proxy;
+      if (scoreDiff < -1e-9) {
+        best = cand;
+        continue;
+      }
+      // Tie-break: prefer reported gamma numerically closest to target.
+      if (Math.abs(scoreDiff) <= 1e-9 && cand.strict_gamma_delta < best.strict_gamma_delta) {
+        best = cand;
+      }
+    }
+
+    return best;
+  }
+
   function postProgress(phase: string, force = false) {
     progressCounter++;
     if (!force && progressCounter % 50 !== 0) return;
@@ -102,13 +211,13 @@ function runOptimization(config: {
     // Check direct match
     if (Math.abs(r1.achieved_a - r2.achieved_a) < tol &&
         Math.abs(r1.achieved_b - r2.achieved_b) < tol &&
-        Math.abs(r1.achieved_gamma - r2.achieved_gamma) < angleTol) {
+        gammaDeltaDeg(r1.achieved_gamma, r2.achieved_gamma) < angleTol) {
       return true;
     }
     // Check swapped a<->b match (equivalent supercell)
     if (Math.abs(r1.achieved_a - r2.achieved_b) < tol &&
         Math.abs(r1.achieved_b - r2.achieved_a) < tol &&
-        Math.abs(r1.achieved_gamma - r2.achieved_gamma) < angleTol) {
+        gammaDeltaDeg(r1.achieved_gamma, r2.achieved_gamma) < angleTol) {
       return true;
     }
     return false;
@@ -169,9 +278,16 @@ function runOptimization(config: {
       // Determinant filter
       if (absDet < meta.minDet || absDet > meta.maxDet) continue;
 
-      const error_a_pct = Math.abs(a_super - meta.target.a) / meta.target.a * 100;
-      const error_b_pct = Math.abs(b_super - meta.target.b) / meta.target.b * 100;
-      const error_gamma_pct = Math.abs(gamma_super - meta.target.gamma) / meta.target.gamma * 100;
+      const bestMatch = selectBestMatch(n, m, k, l, a_super, b_super, gamma_super, meta.target);
+      const {
+        matrix: bestMatrix,
+        achieved_a: achievedA,
+        achieved_b: achievedB,
+        achieved_gamma: achievedGamma,
+        error_a_pct,
+        error_b_pct,
+        error_gamma_pct,
+      } = bestMatch;
 
       // Only keep results with max individual error < 10%
       if (Math.max(error_a_pct, error_b_pct, error_gamma_pct) >= 10) continue;
@@ -186,10 +302,10 @@ function runOptimization(config: {
 
       const tier = classifyTier(error_a_pct, error_b_pct, error_gamma_pct);
       const result: MatrixResult = {
-        matrix: [n, m, k, l],
-        achieved_a: a_super,
-        achieved_b: b_super,
-        achieved_gamma: gamma_super,
+        matrix: bestMatrix,
+        achieved_a: achievedA,
+        achieved_b: achievedB,
+        achieved_gamma: achievedGamma,
         error_a_pct, error_b_pct, error_gamma_pct,
         atom_count: atomCount,
         score,

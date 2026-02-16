@@ -274,9 +274,10 @@ const MatrixOptimizer: React.FC = () => {
         monolayer: mat,
         duration_ms: duration * 1000,
         scan_limit: 20,
+        target_method: targetMethod,
       },
     });
-  }, [surfaceTargets, duration]);
+  }, [surfaceTargets, duration, targetMethod]);
 
   const stopOptimization = useCallback(() => {
     if (workerRef.current) {
