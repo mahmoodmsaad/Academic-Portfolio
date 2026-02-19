@@ -195,7 +195,7 @@ Format your response with clear markdown headers and organized sections. Be thor
                 'content': prompt
             }
         ],
-        'max_tokens': 8000,  # Extended for comprehensive output
+        'max_tokens': 4000,  # Reduced to stay within API Gateway 29s timeout
         'temperature': 0.3,  # Lower for technical precision
         'stream': False
     }
@@ -213,7 +213,7 @@ Format your response with clear markdown headers and organized sections. Be thor
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=90) as response:
+        with urllib.request.urlopen(req, timeout=28) as response:
             result = json.loads(response.read().decode('utf-8'))
             return result['choices'][0]['message']['content']
     except urllib.error.HTTPError as e:

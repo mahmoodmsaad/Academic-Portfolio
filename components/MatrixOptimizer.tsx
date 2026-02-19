@@ -510,9 +510,14 @@ Cite specific papers (author, journal, year) throughout. Provide specific numeri
           body: JSON.stringify({ prompt, provider: dftProvider }),
         }
       );
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `API error ${resp.status}`);
-      setDftAdvice(data.content);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const msg = resp.status === 503
+          ? 'Request timed out (DeepSeek can be slow). Please try Perplexity AI instead.'
+          : (data as { error?: string }).error || `API error ${resp.status}`;
+        throw new Error(msg);
+      }
+      setDftAdvice((data as { content?: string }).content || '');
     } catch (err) {
       setDftError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

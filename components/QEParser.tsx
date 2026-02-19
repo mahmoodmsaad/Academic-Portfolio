@@ -1032,7 +1032,10 @@ Provide your response in a well-organized format with clear headers and specific
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `API request failed: ${response.status}`);
+        const msg = response.status === 503
+          ? 'Request timed out (DeepSeek can be slow). Please try Perplexity AI instead.'
+          : (errorData as { error?: string }).error || `API request failed: ${response.status}`;
+        throw new Error(msg);
       }
 
       const data = await response.json();
