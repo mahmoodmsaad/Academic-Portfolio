@@ -108,7 +108,7 @@ Format your response with clear headers and organized sections. Use markdown for
                 'content': prompt
             }
         ],
-        'max_tokens': 8000,  # Extended for comprehensive output
+        'max_tokens': 4000,  # Reduced to stay within API Gateway 29s timeout
         'temperature': 0.3,  # Lower temperature for more precise technical content
         'top_p': 0.9,
         'return_citations': True,
@@ -138,7 +138,7 @@ Format your response with clear headers and organized sections. Use markdown for
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=90) as response:
+        with urllib.request.urlopen(req, timeout=28) as response:
             result = json.loads(response.read().decode('utf-8'))
             content = result['choices'][0]['message']['content']
 

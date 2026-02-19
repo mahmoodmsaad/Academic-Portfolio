@@ -384,118 +384,21 @@ const MatrixOptimizer: React.FC = () => {
     const magneticMetals = ['Fe', 'Co', 'Ni', 'Mn', 'Cr'];
     const isMagnetic = magneticMetals.includes(element);
 
-    const prompt = `You are an expert computational materials scientist specializing in DFT calculations of 2D material/metal surface interfaces using Quantum ESPRESSO.
+    const prompt = `DFT setup for ${monolayer.name} on ${element}${hkl} surface using Quantum ESPRESSO (${dftCalcType}).
 
-DO NOT SUMMARIZE. Provide COMPREHENSIVE, IN-DEPTH recommendations with specific numerical values, physical reasoning, and literature references throughout.
+System: ${monolayer.name} monolayer on ${element}${hkl}. Elements: ${allElements.join(', ')}. Surface cell: a=${target.a.toFixed(3)}A b=${target.b.toFixed(3)}A gamma=${target.gamma.toFixed(1)}. Monolayer supercell matrix [[${best.matrix[0]},${best.matrix[1]}],[${best.matrix[2]},${best.matrix[3]}]], achieved a=${best.achieved_a.toFixed(3)}A, ${best.atom_count} atoms. Mismatch: a=${best.error_a_pct.toFixed(2)}% b=${best.error_b_pct.toFixed(2)}%.${isHeavy ? ' ' + element + ' is a heavy element (SOC may be needed).' : ''}${isMagnetic ? ' ' + element + ' is magnetic.' : ''}
 
-${'═'.repeat(66)}
-SYSTEM: ${monolayer.name} / ${element}${hkl} HETEROGENEOUS SLAB
-${'═'.repeat(66)}
+Give specific numerical recommendations for:
+1. K-point grid (exact Monkhorst-Pack mesh for this supercell size)
+2. ecutwfc and ecutrho for each element (${allElements.join(', ')}) with SSSP pseudopotential names
+3. Number of ${element} slab layers, how many to fix, vacuum spacing (A), interlayer distance ${monolayer.name}-${element} from literature
+4. vdW correction scheme (D3, rVV10, etc.) with QE input parameters
+5. Smearing type and degauss for metallic ${element}
+6. conv_thr, mixing_beta${dftCalcType !== 'scf' ? ', forc_conv_thr' : ''}
+7. ${monolayer.name}/${element} bonding character (physisorption/chemisorption), dipole correction needed?
+8. Step-by-step workflow for this heterostructure calculation
 
-SUBSTRATE (${element}${hkl} surface):
-• Element: ${element}${isHeavy ? ' [HEAVY ELEMENT — relativistic effects important]' : ''}${isMagnetic ? ' [MAGNETIC ELEMENT — spin polarization required]' : ''}
-• Surface: ${hkl}, ${target.label}
-• Surface cell: a = ${target.a.toFixed(4)} Å, b = ${target.b.toFixed(4)} Å, γ = ${target.gamma.toFixed(2)}°
-• Surface area: ${target.area.toFixed(2)} Å²
-• Bulk lattice constant: ${bulkInfo ? `${(bulkInfo.lattice_a as number).toFixed(4)} Å` : 'from ASE database'}
-
-OVERLAYER (${monolayer.name} monolayer):
-• Material: ${monolayer.name}
-• Intrinsic unit cell: a = ${monolayer.a} Å, b = ${monolayer.b} Å, γ = ${monolayer.gamma}°
-• Atoms per unit cell: ${monolayer.atoms_per_cell}
-• Supercell matrix: [[${best.matrix[0]}, ${best.matrix[1]}], [${best.matrix[2]}, ${best.matrix[3]}]]
-• Achieved supercell: a = ${best.achieved_a.toFixed(4)} Å, b = ${best.achieved_b.toFixed(4)} Å, γ = ${best.achieved_gamma.toFixed(2)}°
-• Monolayer atoms in supercell: ${best.atom_count}
-
-LATTICE MISMATCH:
-• Δa = ${best.error_a_pct.toFixed(3)}%
-• Δb = ${best.error_b_pct.toFixed(3)}%
-• Δγ = ${best.error_gamma_pct.toFixed(3)}%
-• Match quality: ${best.tier}
-
-CALCULATION SETUP:
-• All elements: ${allElements.join(', ')}
-• Requested calculation type: ${dftCalcType}
-• Crystal system of monolayer: ${monolayer.crystal_system}
-
-${'═'.repeat(66)}
-PROVIDE DETAILED DFT SETUP RECOMMENDATIONS:
-${'═'.repeat(66)}
-
-1. K-POINT MESH OPTIMIZATION
-   - Exact Monkhorst-Pack grid for the ${target.label} supercell (justify using the reciprocal lattice vector lengths)
-   - Recommended k-point density (k-points per Å⁻¹)
-   - Whether Gamma-centered mesh is needed
-   - For metallic substrate: smearing vs. tetrahedron method
-   - Cost-accuracy trade-off for different grid sizes
-
-2. PLANE-WAVE CUTOFF ENERGIES
-   For each element (${allElements.join(', ')}):
-   - Recommended ecutwfc (Ry) with scientific justification
-   - ecutrho (Ry) and ratio to ecutwfc
-   - Convergence testing protocol (give specific values to test)
-   - Final recommended values with safety margin
-
-3. PSEUDOPOTENTIALS
-   For each element (${allElements.join(', ')}):
-   - Specific SSSP Efficiency and SSSP Precision filenames
-   - PseudoDojo alternatives
-   - NC vs US vs PAW recommendation for this system
-   ${isHeavy ? '- Scalar-relativistic vs fully-relativistic (with SOC) trade-offs for ' + element : ''}
-   - Valence electron configurations
-   - Known issues or quirks for this element in surface calculations
-
-4. SLAB MODEL CONSTRUCTION
-   - Minimum number of ${element} layers needed for converged surface energy (cite convergence tests from literature)
-   - Recommended total slab thickness (Å)
-   - How many bottom ${element} layers to fix/constrain and why (bulk-like region)
-   - Optimal vacuum spacing above ${monolayer.name} (Å) — why that value prevents periodic image interactions
-   - Whether a dipole correction (assume_isolated = '2D' or dipole) is needed for ${monolayer.name}/${element}
-   - Asymmetric vs symmetric slab considerations
-
-5. INTERLAYER DISTANCE
-   - Initial ${monolayer.name}/${element}${hkl} interlayer distance from DFT literature (cite papers with year)
-   - Typical equilibrium distance range for physisorbed vs chemisorbed systems
-   - How to set up the initial geometry (stacking registry, high-symmetry starting points)
-
-6. VAN DER WAALS CORRECTIONS
-   - Is vdW correction essential for ${monolayer.name}/${element}? (physisorption vs chemisorption assessment)
-   - Best dispersion scheme: DFT-D3(BJ), DFT-D3(zero), rVV10, vdW-DF2, or other
-   - Specific QE input parameters (london, dftd3_version, etc.)
-   - Literature precedent for ${monolayer.name} on metal surfaces
-
-7. CONVERGENCE PARAMETERS FOR ${dftCalcType.toUpperCase()}
-   - conv_thr value and physical meaning
-   - mixing_beta and mixing_mode recommendation for metallic system
-   - electron_maxstep
-   ${dftCalcType !== 'scf' ? '- forc_conv_thr for ionic relaxation\n   - ion_dynamics algorithm\n   - nstep (max ionic steps)' : ''}
-   ${dftCalcType === 'vc-relax' ? '- press_conv_thr\n   - cell_dynamics\n   - Whether to allow cell relaxation for a supercell with mismatch' : ''}
-
-8. SMEARING AND ELECTRONIC OCCUPATION
-   - Smearing type for metallic ${element} substrate (gaussian, mp, mv, fd)
-   - degauss value in Ry with justification
-   - Whether ${monolayer.name} introduces a gap and how it affects the smearing choice
-
-9. SPECIAL PHYSICS FOR ${monolayer.name}/${element}${hkl}
-   - Physisorption vs chemisorption character: expected binding energy range (eV) and bond character
-   - Strain effects from ${best.error_a_pct.toFixed(2)}% lattice mismatch: impact on electronic structure and stability
-   - Charge transfer direction and magnitude at interface (cite DFT studies if available)
-   - Interface dipole and work function modification
-   ${isHeavy ? '- Spin-orbit coupling importance for ' + element + ': when to include and computational cost\n   - Effect of SOC on surface states and interface properties' : ''}
-   ${isMagnetic ? '- Spin polarization setup: starting_magnetization values for ' + element + '\n   - Expected magnetic ground state' : ''}
-   - Whether DFT+U is needed for any element
-   - Band alignment at the ${monolayer.name}/${element} interface
-
-10. STEP-BY-STEP DFT WORKFLOW
-    Step 1: Construct and relax the clean ${element}${hkl} slab
-    Step 2: Relax the freestanding ${monolayer.name} monolayer
-    Step 3: Construct the heterostructure (describe stacking registry and interlayer distance)
-    Step 4: Perform ${dftCalcType} of the full heterostructure
-    Step 5: Post-processing (band structure, projected DOS, charge density difference, Bader analysis)
-    - Tools to use (bands.x, dos.x, pp.x, Wannier90)
-    - What physical quantities to extract and report
-
-Cite specific papers (author, journal, year) throughout. Provide specific numerical values — avoid vague recommendations like "use a moderate cutoff". Be specific to the ${monolayer.name}/${element}${hkl} interface system.`;
+Use specific numbers throughout. Cite relevant papers where possible.`;
 
     setIsDftLoading(true);
     setDftError('');
@@ -513,7 +416,7 @@ Cite specific papers (author, journal, year) throughout. Provide specific numeri
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         const msg = resp.status === 503
-          ? 'Request timed out (DeepSeek can be slow). Please try Perplexity AI instead.'
+          ? `Request timed out. ${dftProvider === 'deepseek' ? 'Try Perplexity AI instead.' : 'The AI provider is slow — please try again.'}`
           : (data as { error?: string }).error || `API error ${resp.status}`;
         throw new Error(msg);
       }
