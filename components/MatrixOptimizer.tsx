@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Calculator, Download, Info, ChevronRight, ChevronLeft,
-  CheckCircle, AlertCircle, Upload, Play, Square, RotateCcw, Atom, Loader2,
+  CheckCircle, AlertCircle, Upload, Play, Square, RotateCcw, Atom, Loader2, Brain,
 } from 'lucide-react';
 import { METALS, MONOLAYER_PRESETS, getMetalBySymbol, getMonolayerByName } from '../utils/monolayerDatabase';
 import { computeSurfaceTargets } from '../utils/surfaceCalculator';
@@ -83,8 +83,21 @@ const MatrixOptimizer: React.FC = () => {
   const [results, setResults] = useState<TargetResults[] | null>(null);
   const [activeTab, setActiveTab] = useState(0);
 
+  // === DFT Setup Assistant ===
+  const [dftProvider, setDftProvider] = useState<'perplexity' | 'deepseek'>('perplexity');
+  const [dftCalcType, setDftCalcType] = useState('relax');
+  const [dftAdvice, setDftAdvice] = useState<string | null>(null);
+  const [isDftLoading, setIsDftLoading] = useState(false);
+  const [dftError, setDftError] = useState('');
+
   // === Blob URL tracking for memory cleanup ===
   const blobUrlsRef = useRef<string[]>([]);
+
+  // === Reset DFT advice when switching supercell tabs ===
+  useEffect(() => {
+    setDftAdvice(null);
+    setDftError('');
+  }, [activeTab]);
 
   // === Cleanup worker + blob URLs on unmount ===
   useEffect(() => {
@@ -337,6 +350,188 @@ const MatrixOptimizer: React.FC = () => {
     URL.revokeObjectURL(url);
     blobUrlsRef.current = blobUrlsRef.current.filter(u => u !== url);
   };
+
+  // === DFT: extract unique element symbols from monolayer ===
+  const getMonolayerElements = (ml: MonolayerMaterial): string[] => {
+    if (ml.baseAtoms && ml.baseAtoms.length > 0) {
+      return [...new Set(ml.baseAtoms.map((a) => a.symbol))];
+    }
+    const nameMap: Record<string, string[]> = {
+      'hBN': ['B', 'N'], 'Graphene': ['C'], 'MoS2': ['Mo', 'S'],
+      'MoSe2': ['Mo', 'Se'], 'WS2': ['W', 'S'], 'WSe2': ['W', 'Se'],
+      'Silicene': ['Si'], 'Germanene': ['Ge'], 'Stanene': ['Sn'],
+      'Phosphorene': ['P'], 'Borophene': ['B'], 'GaSe': ['Ga', 'Se'],
+      'InSe': ['In', 'Se'], 'GeS': ['Ge', 'S'], 'SnS': ['Sn', 'S'],
+      'SnSe': ['Sn', 'Se'], 'h-BAs': ['B', 'As'], 'Bi2Se3 (QL)': ['Bi', 'Se'],
+    };
+    return nameMap[ml.name] ?? [ml.name];
+  };
+
+  // === DFT: generate AI recommendations for the optimized heterostructure ===
+  const generateDFTAdvice = useCallback(async () => {
+    if (!results || !monolayer) return;
+    const targetResults = results[activeTab];
+    const target = targetResults.target;
+    const best = targetResults.results[0];
+    if (!best) return;
+
+    const element = activeElement;
+    const mlElements = getMonolayerElements(monolayer);
+    const allElements = [element, ...mlElements.filter((e) => e !== element)];
+    const hkl = `(${millerH}${millerK}${millerL})`;
+    const heavyMetals = ['Pt', 'Au', 'W', 'Ir', 'Os', 'Re', 'Hg', 'Tl', 'Pb', 'Bi', 'Ta', 'Hf'];
+    const isHeavy = heavyMetals.includes(element);
+    const magneticMetals = ['Fe', 'Co', 'Ni', 'Mn', 'Cr'];
+    const isMagnetic = magneticMetals.includes(element);
+
+    const prompt = `You are an expert computational materials scientist specializing in DFT calculations of 2D material/metal surface interfaces using Quantum ESPRESSO.
+
+DO NOT SUMMARIZE. Provide COMPREHENSIVE, IN-DEPTH recommendations with specific numerical values, physical reasoning, and literature references throughout.
+
+${'═'.repeat(66)}
+SYSTEM: ${monolayer.name} / ${element}${hkl} HETEROGENEOUS SLAB
+${'═'.repeat(66)}
+
+SUBSTRATE (${element}${hkl} surface):
+• Element: ${element}${isHeavy ? ' [HEAVY ELEMENT — relativistic effects important]' : ''}${isMagnetic ? ' [MAGNETIC ELEMENT — spin polarization required]' : ''}
+• Surface: ${hkl}, ${target.label}
+• Surface cell: a = ${target.a.toFixed(4)} Å, b = ${target.b.toFixed(4)} Å, γ = ${target.gamma.toFixed(2)}°
+• Surface area: ${target.area.toFixed(2)} Å²
+• Bulk lattice constant: ${bulkInfo ? `${(bulkInfo.lattice_a as number).toFixed(4)} Å` : 'from ASE database'}
+
+OVERLAYER (${monolayer.name} monolayer):
+• Material: ${monolayer.name}
+• Intrinsic unit cell: a = ${monolayer.a} Å, b = ${monolayer.b} Å, γ = ${monolayer.gamma}°
+• Atoms per unit cell: ${monolayer.atoms_per_cell}
+• Supercell matrix: [[${best.matrix[0]}, ${best.matrix[1]}], [${best.matrix[2]}, ${best.matrix[3]}]]
+• Achieved supercell: a = ${best.achieved_a.toFixed(4)} Å, b = ${best.achieved_b.toFixed(4)} Å, γ = ${best.achieved_gamma.toFixed(2)}°
+• Monolayer atoms in supercell: ${best.atom_count}
+
+LATTICE MISMATCH:
+• Δa = ${best.error_a_pct.toFixed(3)}%
+• Δb = ${best.error_b_pct.toFixed(3)}%
+• Δγ = ${best.error_gamma_pct.toFixed(3)}%
+• Match quality: ${best.tier}
+
+CALCULATION SETUP:
+• All elements: ${allElements.join(', ')}
+• Requested calculation type: ${dftCalcType}
+• Crystal system of monolayer: ${monolayer.crystal_system}
+
+${'═'.repeat(66)}
+PROVIDE DETAILED DFT SETUP RECOMMENDATIONS:
+${'═'.repeat(66)}
+
+1. K-POINT MESH OPTIMIZATION
+   - Exact Monkhorst-Pack grid for the ${target.label} supercell (justify using the reciprocal lattice vector lengths)
+   - Recommended k-point density (k-points per Å⁻¹)
+   - Whether Gamma-centered mesh is needed
+   - For metallic substrate: smearing vs. tetrahedron method
+   - Cost-accuracy trade-off for different grid sizes
+
+2. PLANE-WAVE CUTOFF ENERGIES
+   For each element (${allElements.join(', ')}):
+   - Recommended ecutwfc (Ry) with scientific justification
+   - ecutrho (Ry) and ratio to ecutwfc
+   - Convergence testing protocol (give specific values to test)
+   - Final recommended values with safety margin
+
+3. PSEUDOPOTENTIALS
+   For each element (${allElements.join(', ')}):
+   - Specific SSSP Efficiency and SSSP Precision filenames
+   - PseudoDojo alternatives
+   - NC vs US vs PAW recommendation for this system
+   ${isHeavy ? '- Scalar-relativistic vs fully-relativistic (with SOC) trade-offs for ' + element : ''}
+   - Valence electron configurations
+   - Known issues or quirks for this element in surface calculations
+
+4. SLAB MODEL CONSTRUCTION
+   - Minimum number of ${element} layers needed for converged surface energy (cite convergence tests from literature)
+   - Recommended total slab thickness (Å)
+   - How many bottom ${element} layers to fix/constrain and why (bulk-like region)
+   - Optimal vacuum spacing above ${monolayer.name} (Å) — why that value prevents periodic image interactions
+   - Whether a dipole correction (assume_isolated = '2D' or dipole) is needed for ${monolayer.name}/${element}
+   - Asymmetric vs symmetric slab considerations
+
+5. INTERLAYER DISTANCE
+   - Initial ${monolayer.name}/${element}${hkl} interlayer distance from DFT literature (cite papers with year)
+   - Typical equilibrium distance range for physisorbed vs chemisorbed systems
+   - How to set up the initial geometry (stacking registry, high-symmetry starting points)
+
+6. VAN DER WAALS CORRECTIONS
+   - Is vdW correction essential for ${monolayer.name}/${element}? (physisorption vs chemisorption assessment)
+   - Best dispersion scheme: DFT-D3(BJ), DFT-D3(zero), rVV10, vdW-DF2, or other
+   - Specific QE input parameters (london, dftd3_version, etc.)
+   - Literature precedent for ${monolayer.name} on metal surfaces
+
+7. CONVERGENCE PARAMETERS FOR ${dftCalcType.toUpperCase()}
+   - conv_thr value and physical meaning
+   - mixing_beta and mixing_mode recommendation for metallic system
+   - electron_maxstep
+   ${dftCalcType !== 'scf' ? '- forc_conv_thr for ionic relaxation\n   - ion_dynamics algorithm\n   - nstep (max ionic steps)' : ''}
+   ${dftCalcType === 'vc-relax' ? '- press_conv_thr\n   - cell_dynamics\n   - Whether to allow cell relaxation for a supercell with mismatch' : ''}
+
+8. SMEARING AND ELECTRONIC OCCUPATION
+   - Smearing type for metallic ${element} substrate (gaussian, mp, mv, fd)
+   - degauss value in Ry with justification
+   - Whether ${monolayer.name} introduces a gap and how it affects the smearing choice
+
+9. SPECIAL PHYSICS FOR ${monolayer.name}/${element}${hkl}
+   - Physisorption vs chemisorption character: expected binding energy range (eV) and bond character
+   - Strain effects from ${best.error_a_pct.toFixed(2)}% lattice mismatch: impact on electronic structure and stability
+   - Charge transfer direction and magnitude at interface (cite DFT studies if available)
+   - Interface dipole and work function modification
+   ${isHeavy ? '- Spin-orbit coupling importance for ' + element + ': when to include and computational cost\n   - Effect of SOC on surface states and interface properties' : ''}
+   ${isMagnetic ? '- Spin polarization setup: starting_magnetization values for ' + element + '\n   - Expected magnetic ground state' : ''}
+   - Whether DFT+U is needed for any element
+   - Band alignment at the ${monolayer.name}/${element} interface
+
+10. STEP-BY-STEP DFT WORKFLOW
+    Step 1: Construct and relax the clean ${element}${hkl} slab
+    Step 2: Relax the freestanding ${monolayer.name} monolayer
+    Step 3: Construct the heterostructure (describe stacking registry and interlayer distance)
+    Step 4: Perform ${dftCalcType} of the full heterostructure
+    Step 5: Post-processing (band structure, projected DOS, charge density difference, Bader analysis)
+    - Tools to use (bands.x, dos.x, pp.x, Wannier90)
+    - What physical quantities to extract and report
+
+Cite specific papers (author, journal, year) throughout. Provide specific numerical values — avoid vague recommendations like "use a moderate cutoff". Be specific to the ${monolayer.name}/${element}${hkl} interface system.`;
+
+    setIsDftLoading(true);
+    setDftError('');
+    setDftAdvice(null);
+
+    try {
+      const resp = await fetch(
+        'https://b0q9fbz7nl.execute-api.us-east-1.amazonaws.com/prod/dft-advice',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, provider: dftProvider }),
+        }
+      );
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `API error ${resp.status}`);
+      setDftAdvice(data.content);
+    } catch (err) {
+      setDftError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsDftLoading(false);
+    }
+  }, [results, monolayer, activeTab, dftProvider, dftCalcType, activeElement, millerH, millerK, millerL, bulkInfo]);
+
+  // === DFT: download AI advice as markdown ===
+  const downloadDFTAdvice = useCallback(() => {
+    if (!dftAdvice || !monolayer) return;
+    const filename = `DFT_${monolayer.name}_${activeElement}_${millerH}${millerK}${millerL}.md`;
+    const blob = new Blob([dftAdvice], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [dftAdvice, monolayer, activeElement, millerH, millerK, millerL]);
 
   // === Download CIF for a surface target (from ASE Lambda data) ===
   const downloadTargetCIF = (target: SurfaceCellParams) => {
@@ -1084,6 +1279,149 @@ const MatrixOptimizer: React.FC = () => {
                 {results[activeTab] && (
                   <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
                     Target: a={results[activeTab].target.a.toFixed(4)} A, b={results[activeTab].target.b.toFixed(4)} A, gamma={results[activeTab].target.gamma.toFixed(2)} deg, area={results[activeTab].target.area.toFixed(2)} A2
+                  </div>
+                )}
+
+                {/* ── DFT Setup Assistant ── */}
+                {monolayer && results[activeTab] && (
+                  <div className="border border-purple-200 rounded-xl overflow-hidden mt-4">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3 flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-white flex-shrink-0" />
+                      <div>
+                        <h5 className="text-white font-semibold text-sm">DFT Setup Assistant</h5>
+                        <p className="text-purple-200 text-xs">
+                          {monolayer.name} / {activeElement}({millerH}{millerK}{millerL}) — AI-powered parameter recommendations
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-4 bg-white">
+                      {/* System summary cards */}
+                      {(() => {
+                        const target = results[activeTab].target;
+                        const best = results[activeTab].results[0];
+                        return (
+                          <>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                                <p className="font-semibold text-slate-700 mb-1">Substrate</p>
+                                <p className="text-slate-600">{activeElement}({millerH}{millerK}{millerL}) · {target.label}</p>
+                                <p className="text-slate-500 font-mono mt-0.5">a={target.a.toFixed(3)} Å · γ={target.gamma.toFixed(1)}°</p>
+                                <p className="text-slate-500 font-mono">Area={target.area.toFixed(1)} Å²</p>
+                              </div>
+                              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                                <p className="font-semibold text-slate-700 mb-1">Overlayer</p>
+                                <p className="text-slate-600">{monolayer.name} · [{best ? `${best.matrix[0]},${best.matrix[1]}|${best.matrix[2]},${best.matrix[3]}` : '—'}]</p>
+                                <p className="text-slate-500 font-mono mt-0.5">{best ? `a=${best.achieved_a.toFixed(3)} Å · Δa=${best.error_a_pct.toFixed(2)}%` : '—'}</p>
+                                <p className="text-slate-500 font-mono">{best ? `Atoms: ${best.atom_count} · ${best.tier}` : '—'}</p>
+                              </div>
+                            </div>
+
+                            {/* Mismatch summary */}
+                            {best && (
+                              <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-xs text-purple-700 flex flex-wrap gap-4">
+                                <span>Δa = {best.error_a_pct.toFixed(2)}%</span>
+                                <span>Δb = {best.error_b_pct.toFixed(2)}%</span>
+                                <span>Δγ = {best.error_gamma_pct.toFixed(2)}%</span>
+                                <span>Match: <strong>{best.tier}</strong></span>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+
+                      {/* Settings row */}
+                      <div className="flex flex-wrap gap-4 items-end">
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">Calculation Type</label>
+                          <select
+                            value={dftCalcType}
+                            onChange={(e) => setDftCalcType(e.target.value)}
+                            title="Calculation Type"
+                            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+                          >
+                            <option value="relax">Relax (ionic positions)</option>
+                            <option value="scf">SCF only</option>
+                            <option value="vc-relax">VC-Relax (cell + ions)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">AI Provider</label>
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setDftProvider('perplexity')}
+                              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                dftProvider === 'perplexity'
+                                  ? 'bg-purple-600 text-white border-purple-600'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'
+                              }`}
+                            >
+                              Perplexity AI
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDftProvider('deepseek')}
+                              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                dftProvider === 'deepseek'
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                              }`}
+                            >
+                              DeepSeek
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Generate button */}
+                      <button
+                        type="button"
+                        onClick={generateDFTAdvice}
+                        disabled={isDftLoading || results[activeTab].results.length === 0}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-all"
+                      >
+                        {isDftLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Brain className="w-4 h-4" />
+                        )}
+                        {isDftLoading ? 'Generating recommendations…' : 'Generate DFT Recommendations'}
+                      </button>
+                      <p className="text-xs text-slate-400 text-center -mt-2">
+                        Analysis may take 30–60 seconds for comprehensive results
+                      </p>
+
+                      {/* Error */}
+                      {dftError && (
+                        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+                          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                          {dftError}
+                        </div>
+                      )}
+
+                      {/* AI Response */}
+                      {dftAdvice && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-slate-700">DFT Recommendations</span>
+                            <button
+                              type="button"
+                              onClick={downloadDFTAdvice}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition-colors"
+                            >
+                              <Download className="w-3 h-3" />
+                              Download .md
+                            </button>
+                          </div>
+                          <pre className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 overflow-auto max-h-[700px] whitespace-pre-wrap font-mono leading-relaxed">
+                            {dftAdvice}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
