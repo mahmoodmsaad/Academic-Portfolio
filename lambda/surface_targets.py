@@ -81,8 +81,17 @@ def _handle_ase(element, h, k, l):
     except Exception as e:
         return error_response(400, f'Cannot create ({h}{k}{l}) surface for {element}: {str(e)}')
 
-    # Extract surface cell vectors (first two are in-plane)
-    cell = slab.cell
+    # Apply Niggli reduction to get a compact, well-shaped cell.
+    # ASE's surface() can return poorly shaped cells for high-index surfaces
+    # (e.g., two nearly-parallel vectors with a tiny gamma angle).
+    try:
+        from ase.build.tools import niggli_reduce
+        slab_reduced = slab.copy()
+        niggli_reduce(slab_reduced)
+        cell = slab_reduced.cell
+    except Exception:
+        cell = slab.cell
+
     v1 = np.array(cell[0])
     v2 = np.array(cell[1])
 
