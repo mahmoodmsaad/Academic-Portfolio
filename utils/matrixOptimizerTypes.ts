@@ -108,3 +108,21 @@ export interface WorkerErrorMessage {
 }
 
 export type WorkerOutMessage = WorkerProgressMessage | WorkerResultMessage | WorkerErrorMessage;
+
+// ZSL (Zincblende Surface Lattice) matching result
+export interface ZSLResult {
+  rank: number;
+  mismatch_pct: number;
+  von_mises_strain_pct: number;
+  rotation_deg: number;
+  interface_area_ang2: number;
+  film_sl_a: number;
+  film_sl_b: number;
+  substrate_sl_a: number;
+  substrate_sl_b: number;
+  gamma_deg: number;
+  film_supercell_atoms: number;
+  substrate_supercell_atoms: number;
+  film_matrix: [[number, number], [number, number]];
+  tier: ErrorTier;
+}

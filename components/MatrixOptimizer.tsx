@@ -8,7 +8,7 @@ import { computeSurfaceTargets } from '../utils/surfaceCalculator';
 import { parseCIFLatticeParams } from '../utils/matrixMath';
 import type {
   BaseAtom, WizardStep, SurfaceCellParams, MonolayerMaterial, MatrixResult,
-  TargetResults, WorkerOutMessage, WorkerProgressMessage,
+  TargetResults, WorkerOutMessage, WorkerProgressMessage, ZSLResult,
 } from '../utils/matrixOptimizerTypes';
 
 // Surface-target API endpoint (defaults to the hosted endpoint if env var is unset).
@@ -18,6 +18,7 @@ const configuredSurfaceApi = import.meta.env.VITE_SURFACE_API;
 const SURFACE_API_URL =
   configuredSurfaceApi === undefined ? DEFAULT_SURFACE_API_URL : configuredSurfaceApi.trim();
 const SURFACE_API_PYMATGEN_URL = import.meta.env.VITE_SURFACE_API_PYMATGEN?.trim() || '';
+const ZSL_API_URL = import.meta.env.VITE_ZSL_API?.trim() || '';
 
 // === Tier badge colors ===
 const TIER_STYLES: Record<string, string> = {
@@ -82,6 +83,16 @@ const MatrixOptimizer: React.FC = () => {
   // === Step 4: Results ===
   const [results, setResults] = useState<TargetResults[] | null>(null);
   const [activeTab, setActiveTab] = useState(0);
+
+  // === ZSL mode ===
+  const [optimizerMode, setOptimizerMode] = useState<'worker' | 'zsl'>('worker');
+  const [zslResults, setZslResults] = useState<ZSLResult[] | null>(null);
+  const [isZslLoading, setIsZslLoading] = useState(false);
+  const [zslError, setZslError] = useState('');
+  const [zslMaxMismatch, setZslMaxMismatch] = useState(5.0);
+  const [zslMaxArea, setZslMaxArea] = useState(400.0);
+  const [zslTopK, setZslTopK] = useState(5);
+  const [zslTotalCandidates, setZslTotalCandidates] = useState<number | null>(null);
 
   // === DFT Setup Assistant ===
   const [dftProvider, setDftProvider] = useState<'perplexity' | 'deepseek'>('perplexity');
@@ -222,8 +233,11 @@ const MatrixOptimizer: React.FC = () => {
 
     if (mat) {
       setMonolayer(mat);
-      // Start optimization immediately
-      startOptimizationWithMaterial(mat);
+      if (optimizerMode === 'zsl') {
+        runZSLMatch(mat);
+      } else {
+        startOptimizationWithMaterial(mat);
+      }
     }
   };
 
@@ -308,6 +322,81 @@ const MatrixOptimizer: React.FC = () => {
       }, 500);
     }
   }, [progress]);
+
+  // === ZSL: run server-side lattice matching ===
+  const runZSLMatch = useCallback(async (mat: MonolayerMaterial) => {
+    if (!surfaceTargets) return;
+    const substrate = surfaceTargets[0]; // use 1x1 primitive cell as substrate
+    setIsZslLoading(true);
+    setZslResults(null);
+    setZslError('');
+    setZslTotalCandidates(null);
+    setResults(null);
+    setStep('optimize');
+
+    if (!ZSL_API_URL) {
+      setZslError('ZSL API endpoint not configured. Add VITE_ZSL_API to .env.local after deploying lambda/zsl_matcher.py.');
+      setIsZslLoading(false);
+      setStep('monolayer');
+      return;
+    }
+
+    try {
+      const resp = await fetch(ZSL_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          substrate_a: substrate.a,
+          substrate_b: substrate.b,
+          substrate_gamma: substrate.gamma,
+          film_a: mat.a,
+          film_b: mat.b,
+          film_gamma: mat.gamma,
+          max_area: zslMaxArea,
+          max_mismatch: zslMaxMismatch / 100,
+          min_inplane_angle: 45.0,
+          max_aspect_ratio: 8.0,
+          top_k: zslTopK,
+        }),
+      });
+      const data = await resp.json().catch(() => ({})) as {
+        success?: boolean; matches?: ZSLResult[]; total_candidates?: number; error?: string;
+      };
+      if (!resp.ok || !data.success) throw new Error(data.error || `API error ${resp.status}`);
+
+      const matches = data.matches ?? [];
+      setZslResults(matches);
+      setZslTotalCandidates(data.total_candidates ?? matches.length);
+
+      // Build synthetic TargetResults so the DFT Assistant works unchanged
+      if (matches.length > 0) {
+        const syntheticResults: TargetResults[] = [{
+          target: substrate,
+          results: matches.map((m) => ({
+            matrix: [m.film_matrix[0][0], m.film_matrix[0][1], m.film_matrix[1][0], m.film_matrix[1][1]] as [number, number, number, number],
+            achieved_a: m.substrate_sl_a,
+            achieved_b: m.substrate_sl_b,
+            achieved_gamma: m.gamma_deg,
+            error_a_pct: m.mismatch_pct,
+            error_b_pct: m.mismatch_pct,
+            error_gamma_pct: 0,
+            atom_count: m.film_supercell_atoms,
+            score: m.mismatch_pct / 100,
+            tier: m.tier,
+            determinant: Math.abs(m.film_matrix[0][0] * m.film_matrix[1][1] - m.film_matrix[0][1] * m.film_matrix[1][0]),
+          })),
+        }];
+        setResults(syntheticResults);
+        setActiveTab(0);
+      }
+      setStep('results');
+    } catch (err) {
+      setZslError(err instanceof Error ? err.message : 'ZSL match failed');
+      setStep('monolayer');
+    } finally {
+      setIsZslLoading(false);
+    }
+  }, [surfaceTargets, zslMaxMismatch, zslMaxArea, zslTopK]);
 
   // === Download results ===
   const activeElement = elementMode === 'custom' ? customElement.trim() : selectedMetal;
@@ -621,7 +710,7 @@ Use specific numbers throughout. Cite relevant papers where possible.`;
                   {i > 0 && <div className={`flex-shrink-0 w-8 h-0.5 ${i <= currentStepIdx ? 'bg-academic-500' : 'bg-slate-200'}`} />}
                   <button
                     onClick={() => {
-                      if (i < currentStepIdx && !isOptimizing) setStep(s.id);
+                      if (i < currentStepIdx && !isOptimizing && !isZslLoading) setStep(s.id);
                     }}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex-shrink-0
                       ${step === s.id ? 'bg-academic-100 text-academic-700' : ''}
@@ -969,23 +1058,89 @@ Use specific numbers throughout. Cite relevant papers where possible.`;
                   </div>
                 )}
 
-                {/* Duration selector */}
+                {/* Optimizer Mode Toggle */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2" htmlFor="duration-select">
-                    Optimization Duration
-                  </label>
-                  <select
-                    id="duration-select"
-                    value={duration}
-                    onChange={(e) => setDuration(parseInt(e.target.value))}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 bg-white"
-                  >
-                    <option value={60}>1 minute</option>
-                    <option value={180}>3 minutes (recommended)</option>
-                    <option value={300}>5 minutes</option>
-                    <option value={600}>10 minutes (deep search)</option>
-                  </select>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Optimization Strategy</label>
+                  <div className="flex gap-2">
+                    {([
+                      ['worker', 'Browser (Brute-force)', 'Searches millions of matrices in your browser.'],
+                      ['zsl', 'Server (ZSL)', 'Pymatgen ZSL algorithm. Scientifically rigorous.'],
+                    ] as const).map(([id, label, desc]) => (
+                      <button
+                        type="button"
+                        key={id}
+                        onClick={() => setOptimizerMode(id)}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors border-2 text-left ${
+                          optimizerMode === id
+                            ? 'border-academic-500 bg-academic-50 text-academic-700'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="font-semibold block">{label}</span>
+                        <span className="text-xs text-slate-500 mt-0.5 block">{desc}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Duration selector (worker mode only) */}
+                {optimizerMode === 'worker' && (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2" htmlFor="duration-select">
+                      Optimization Duration
+                    </label>
+                    <select
+                      id="duration-select"
+                      value={duration}
+                      onChange={(e) => setDuration(parseInt(e.target.value))}
+                      className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 bg-white"
+                    >
+                      <option value={60}>1 minute</option>
+                      <option value={180}>3 minutes (recommended)</option>
+                      <option value={300}>5 minutes</option>
+                      <option value={600}>10 minutes (deep search)</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* ZSL parameters (ZSL mode only) */}
+                {optimizerMode === 'zsl' && (
+                  <div className="space-y-3">
+                    <label className="block text-sm font-semibold text-slate-700">ZSL Parameters</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label htmlFor="zsl-mismatch" className="block text-xs text-slate-500 mb-1">Max Mismatch (%)</label>
+                        <input
+                          id="zsl-mismatch"
+                          type="number" step="0.5" min="0.5" max="15" value={zslMaxMismatch}
+                          onChange={(e) => setZslMaxMismatch(parseFloat(e.target.value) || 5)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="zsl-area" className="block text-xs text-slate-500 mb-1">Max Area (Å²)</label>
+                        <input
+                          id="zsl-area"
+                          type="number" step="50" min="50" max="2000" value={zslMaxArea}
+                          onChange={(e) => setZslMaxArea(parseFloat(e.target.value) || 400)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="zsl-topk" className="block text-xs text-slate-500 mb-1">Top Results</label>
+                        <input
+                          id="zsl-topk"
+                          type="number" step="1" min="1" max="20" value={zslTopK}
+                          onChange={(e) => setZslTopK(parseInt(e.target.value) || 5)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-academic-500 text-sm"
+                        />
+                      </div>
+                    </div>
+                    {zslError && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">{zslError}</div>
+                    )}
+                  </div>
+                )}
 
                 {/* Start Button */}
                 <button
@@ -997,7 +1152,7 @@ Use specific numbers throughout. Cite relevant papers where possible.`;
                   className="w-full bg-academic-600 text-white py-3 rounded-lg font-semibold hover:bg-academic-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-academic-600/30"
                 >
                   <Play className="w-5 h-5" />
-                  Start Optimization
+                  {optimizerMode === 'zsl' ? 'Run ZSL Match' : 'Start Optimization'}
                 </button>
               </div>
             )}
@@ -1005,7 +1160,17 @@ Use specific numbers throughout. Cite relevant papers where possible.`;
             {/* ======== STEP 3: Optimization Progress ======== */}
             {step === 'optimize' && (
               <div className="space-y-6">
-                <h4 className="text-lg font-bold text-slate-900">Optimization in Progress</h4>
+                {isZslLoading ? (
+                  <>
+                    <h4 className="text-lg font-bold text-slate-900">ZSL Matching in Progress</h4>
+                    <div className="flex flex-col items-center justify-center py-12 gap-4">
+                      <Loader2 className="w-12 h-12 text-academic-600 animate-spin" />
+                      <p className="text-slate-600 text-sm">Running ZSL lattice matching on server...</p>
+                      <p className="text-xs text-slate-400">This typically takes 5–20 seconds</p>
+                    </div>
+                  </>
+                ) : (
+                <><h4 className="text-lg font-bold text-slate-900">Optimization in Progress</h4>
 
                 {/* Progress bar */}
                 <div className="space-y-2">
@@ -1067,11 +1232,180 @@ Use specific numbers throughout. Cite relevant papers where possible.`;
                   <Square className="w-5 h-5" />
                   Stop Early & View Results
                 </button>
+                </>
+                )}
               </div>
             )}
 
-            {/* ======== STEP 4: Results ======== */}
-            {step === 'results' && results && (
+            {/* ======== STEP 4: ZSL Results ======== */}
+            {step === 'results' && optimizerMode === 'zsl' && zslResults && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <h4 className="text-lg font-bold text-slate-900">ZSL Matching Results</h4>
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold border bg-purple-100 text-purple-800 border-purple-300">
+                      Algorithm: ZSL
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setResults(null); setProgress(null); setZslResults(null); setZslTotalCandidates(null); setStep('surface'); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-academic-100 hover:bg-academic-200 text-academic-700 rounded-lg transition-colors text-sm"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    New Search
+                  </button>
+                </div>
+
+                {/* ZSL Summary */}
+                <div className="bg-academic-50 border border-academic-200 rounded-lg p-3 text-sm text-academic-800">
+                  <strong>{zslTotalCandidates ?? zslResults.length}</strong> candidates evaluated |{' '}
+                  <strong>{zslResults.length}</strong> matches found | Monolayer: <strong>{monolayer?.name}</strong> | Surface: <strong>{activeElement}({millerH}{millerK}{millerL}) {surfaceTargets?.[0]?.label}</strong>
+                </div>
+
+                {/* ZSL Results table */}
+                {zslResults.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500">
+                    <AlertCircle className="w-8 h-8 mx-auto mb-2 text-slate-400" />
+                    <p>No matches found within {zslMaxMismatch}% mismatch and {zslMaxArea} Å² area.</p>
+                    <p className="text-sm mt-1">Try increasing Max Mismatch or Max Area in ZSL parameters.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-50 text-left">
+                          <th className="px-3 py-2 font-semibold text-slate-700">#</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700">Film Matrix</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700 text-right">Mismatch%</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700 text-right">Strain%</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700 text-right">Rotation°</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700 text-right">Area Å²</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700 text-right">Atoms</th>
+                          <th className="px-3 py-2 font-semibold text-slate-700">Tier</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {zslResults.map((m, i) => (
+                          <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                            <td className="px-3 py-2 font-bold text-academic-600">{m.rank}</td>
+                            <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
+                              [{m.film_matrix[0][0]},{m.film_matrix[0][1]}|{m.film_matrix[1][0]},{m.film_matrix[1][1]}]
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono">{m.mismatch_pct.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right font-mono">{m.von_mises_strain_pct.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right font-mono">{m.rotation_deg.toFixed(1)}</td>
+                            <td className="px-3 py-2 text-right font-mono">{m.interface_area_ang2.toFixed(1)}</td>
+                            <td className="px-3 py-2 text-right">{m.film_supercell_atoms}</td>
+                            <td className="px-3 py-2">
+                              <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${TIER_STYLES[m.tier]}`}>
+                                {TIER_LABELS[m.tier]}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Substrate cell info */}
+                {surfaceTargets?.[0] && (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
+                    Substrate primitive cell: a={surfaceTargets[0].a.toFixed(4)} Å, b={surfaceTargets[0].b.toFixed(4)} Å, γ={surfaceTargets[0].gamma.toFixed(2)}° | Film: a={monolayer?.a} Å, b={monolayer?.b} Å, γ={monolayer?.gamma}°
+                  </div>
+                )}
+
+                {/* DFT Setup Assistant — reuses synthetic results set in runZSLMatch */}
+                {monolayer && results?.[0] && results[0].results.length > 0 && (
+                  <div className="border border-purple-200 rounded-xl overflow-hidden mt-4">
+                    <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3 flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-white flex-shrink-0" />
+                      <div>
+                        <h5 className="text-white font-semibold text-sm">DFT Setup Assistant</h5>
+                        <p className="text-purple-200 text-xs">
+                          {monolayer.name} / {activeElement}({millerH}{millerK}{millerL}) — AI-powered parameter recommendations
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-4 space-y-4 bg-white">
+                      {(() => {
+                        const best = zslResults[0];
+                        return (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                              <p className="font-semibold text-slate-700 mb-1">Substrate</p>
+                              <p className="text-slate-600">{activeElement}({millerH}{millerK}{millerL}) · {surfaceTargets?.[0]?.label}</p>
+                              <p className="text-slate-500 font-mono mt-0.5">a={best.substrate_sl_a.toFixed(3)} Å · γ={best.gamma_deg.toFixed(1)}°</p>
+                              <p className="text-slate-500 font-mono">Area={best.interface_area_ang2.toFixed(1)} Å²</p>
+                            </div>
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                              <p className="font-semibold text-slate-700 mb-1">Overlayer (ZSL)</p>
+                              <p className="text-slate-600">{monolayer.name} · [{best.film_matrix[0][0]},{best.film_matrix[0][1]}|{best.film_matrix[1][0]},{best.film_matrix[1][1]}]</p>
+                              <p className="text-slate-500 font-mono mt-0.5">Mismatch={best.mismatch_pct.toFixed(2)}% · Strain={best.von_mises_strain_pct.toFixed(2)}%</p>
+                              <p className="text-slate-500 font-mono">Atoms: {best.film_supercell_atoms} · {best.tier}</p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      <div className="flex flex-wrap gap-4 items-end">
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">Calculation Type</label>
+                          <select
+                            value={dftCalcType}
+                            onChange={(e) => setDftCalcType(e.target.value)}
+                            title="Calculation Type"
+                            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+                          >
+                            <option value="relax">Relax (ionic positions)</option>
+                            <option value="scf">SCF only</option>
+                            <option value="vc-relax">VC-Relax (cell + ions)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">AI Provider</label>
+                          <div className="flex gap-1">
+                            <button type="button" onClick={() => setDftProvider('perplexity')}
+                              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${dftProvider === 'perplexity' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'}`}>
+                              Perplexity AI
+                            </button>
+                            <button type="button" onClick={() => setDftProvider('deepseek')}
+                              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${dftProvider === 'deepseek' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}>
+                              DeepSeek
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <button type="button" onClick={generateDFTAdvice} disabled={isDftLoading}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-all">
+                        {isDftLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
+                        {isDftLoading ? 'Generating recommendations…' : 'Generate DFT Recommendations'}
+                      </button>
+                      {dftError && (
+                        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+                          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />{dftError}
+                        </div>
+                      )}
+                      {dftAdvice && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-slate-700">DFT Recommendations</span>
+                            <button type="button" onClick={downloadDFTAdvice}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition-colors">
+                              <Download className="w-3 h-3" />Download .md
+                            </button>
+                          </div>
+                          <pre className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 overflow-auto max-h-[700px] whitespace-pre-wrap font-mono leading-relaxed">{dftAdvice}</pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ======== STEP 4: Worker Results ======== */}
+            {step === 'results' && optimizerMode !== 'zsl' && results && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h4 className="text-lg font-bold text-slate-900">Optimization Results</h4>
@@ -1084,7 +1418,7 @@ Use specific numbers throughout. Cite relevant papers where possible.`;
                       Download
                     </button>
                     <button
-                      onClick={() => { setResults(null); setProgress(null); setStep('surface'); }}
+                      onClick={() => { setResults(null); setProgress(null); setZslResults(null); setZslTotalCandidates(null); setStep('surface'); }}
                       className="flex items-center gap-2 px-4 py-2 bg-academic-100 hover:bg-academic-200 text-academic-700 rounded-lg transition-colors text-sm"
                     >
                       <RotateCcw className="w-4 h-4" />
