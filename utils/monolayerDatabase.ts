@@ -5,7 +5,7 @@ import type { MetalEntry, MonolayerMaterial } from './matrixOptimizerTypes';
 
 export const METALS: MetalEntry[] = [
   // FCC metals
-  { symbol: 'Pt', name: 'Platinum',    a0: 3.9242, structure: 'FCC' },
+  { symbol: 'Pt', name: 'Platinum',    a0: 3.9230, structure: 'FCC' },
   { symbol: 'Au', name: 'Gold',        a0: 4.0782, structure: 'FCC' },
   { symbol: 'Ag', name: 'Silver',      a0: 4.0853, structure: 'FCC' },
   { symbol: 'Cu', name: 'Copper',      a0: 3.6149, structure: 'FCC' },
@@ -38,7 +38,7 @@ export const METALS: MetalEntry[] = [
 export const MONOLAYER_PRESETS: MonolayerMaterial[] = [
   // Hexagonal monolayers (a = b, gamma = 120)
   {
-    name: 'hBN', a: 2.504, b: 2.504, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
+    name: 'hBN', a: 2.500, b: 2.500, gamma: 120, atoms_per_cell: 2, crystal_system: 'hexagonal',
     baseAtoms: [
       { symbol: 'B', x: 0, y: 0, z: 0.5 },
       { symbol: 'N', x: 1/3, y: 2/3, z: 0.5 },
