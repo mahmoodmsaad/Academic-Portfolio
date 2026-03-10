@@ -225,11 +225,14 @@ const InterfaceBuilder: React.FC = () => {
         }
         // Store substrate CIF (1×1 primitive slab) for per-match download
         if (surfaceData.targets[0]?.cif) setSubstrateCif(surfaceData.targets[0].cif);
-        // Use surface cell dimensions directly from the ASE builder (physically correct).
-        // The API already uses ASE's accurate built-in lattice constants — no rescaling needed.
-        const baseA = Number(surfaceData.targets[0].a);
-        const baseB = Number(surfaceData.targets[0].b);
-        const baseGamma = Number(surfaceData.targets[0].gamma);
+        // Use the 2×2 supercell (targets[1]) for ZSL input — its area (~27 Å²) keeps the
+        // ZSL search space small (max_area/cell_area ≤ 15) and avoids Lambda 503 timeouts.
+        // The 1×1 cell (targets[0], a≈2.77 Å, area≈6.6 Å²) forces ZSL to enumerate
+        // up to det=60 matrices, exhausting the 29 s API Gateway limit.
+        const zslTarget = surfaceData.targets.length > 1 ? surfaceData.targets[1] : surfaceData.targets[0];
+        const baseA = Number(zslTarget.a);
+        const baseB = Number(zslTarget.b);
+        const baseGamma = Number(zslTarget.gamma);
         const strictMismatch  = maxMismatch / 100;
         const relaxedMismatch = Math.max(strictMismatch, Math.min(0.2, strictMismatch * 2));
         const fetchZsl = async (repeat: number, mismatchFraction: number, requestTopK: number) => {
