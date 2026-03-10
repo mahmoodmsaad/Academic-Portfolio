@@ -14,8 +14,23 @@ import {
 import { METALS, MONOLAYER_PRESETS } from '../utils/monolayerDatabase';
 import type { ZSLResult } from '../utils/matrixOptimizerTypes';
 
-// ── API endpoint (same as MatrixOptimizer) ────────────────────────────────────
+// ── API endpoints (mirrors MatrixOptimizer fallback chain) ───────────────────
 const INTERFACE_MATCH_API_URL = import.meta.env.VITE_INTERFACE_MATCH_API?.trim() || '';
+const SURFACE_API_URL         = import.meta.env.VITE_SURFACE_API?.trim() || '';
+const ZSL_API_URL             = import.meta.env.VITE_ZSL_API?.trim() || '';
+
+interface SurfaceApiResponse {
+  success: boolean;
+  error?: string;
+  targets?: Array<{ a: number; b: number; gamma: number }>;
+  bulk_info?: { lattice_a: number };
+}
+interface ZslApiResponse {
+  success: boolean;
+  error?: string;
+  matches?: ZSLResult[];
+  total_candidates?: number;
+}
 
 // ── Tier helpers ──────────────────────────────────────────────────────────────
 function mismatchTier(pct: number): { label: string; cls: string } {
@@ -103,64 +118,158 @@ const InterfaceBuilder: React.FC = () => {
       setError('Miller indices cannot all be zero.');
       return;
     }
-    if (!INTERFACE_MATCH_API_URL) {
-      setError('API endpoint not configured. Set VITE_INTERFACE_MATCH_API in your .env file.');
-      return;
-    }
-
     const ml = MONOLAYER_PRESETS.find((m) => m.name === monolayer);
     if (!ml) { setError('Unknown monolayer selection.'); return; }
 
     setRunning(true);
     try {
-      const payload = {
-        element: metal,
-        h: millerH,
-        k: millerK,
-        l: millerL,
-        backend: 'ase',
-        substrate: {
-          layers,
-          vacuum: subVacuum,
-          repeat_max: repeatMax,
-          lattice_a: selectedMetal?.a0 ?? null,
-        },
-        film: {
-          name: ml.name,
-          a: ml.a,
-          b: ml.b,
-          gamma: ml.gamma,
-          atoms_per_cell: ml.atoms_per_cell,
-          base_atoms: ml.baseAtoms || [],
-          vacuum: mlVacuum,
-        },
-        matching: {
-          max_mismatch: maxMismatch / 100,
-          max_area: maxArea,
-          top_k: topK,
-          min_inplane_angle: minAngle,
-          max_aspect_ratio: maxAspect,
-          gap,
-        },
-      };
+      if (INTERFACE_MATCH_API_URL) {
+        // ── Path 1: single-endpoint interface workflow ──────────────────────
+        const payload = {
+          element: metal,
+          h: millerH,
+          k: millerK,
+          l: millerL,
+          backend: 'ase',
+          substrate: {
+            layers,
+            vacuum: subVacuum,
+            repeat_max: repeatMax,
+            lattice_a: selectedMetal?.a0 ?? null,
+          },
+          film: {
+            name: ml.name,
+            a: ml.a,
+            b: ml.b,
+            gamma: ml.gamma,
+            atoms_per_cell: ml.atoms_per_cell,
+            base_atoms: ml.baseAtoms || [],
+            vacuum: mlVacuum,
+          },
+          matching: {
+            max_mismatch: maxMismatch / 100,
+            max_area: maxArea,
+            top_k: topK,
+            min_inplane_angle: minAngle,
+            max_aspect_ratio: maxAspect,
+            gap,
+          },
+        };
 
-      const res = await fetch(INTERFACE_MATCH_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+        const res = await fetch(INTERFACE_MATCH_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Server error ${res.status}: ${text.slice(0, 200)}`);
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`Server error ${res.status}: ${text.slice(0, 200)}`);
+        }
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        setMatchStatus(data.status ?? (data.matches?.length ? 'ok' : 'no_match_under_threshold'));
+        setTotalCandidates(data.summary?.num_candidates ?? null);
+        setResults(data.matches ?? []);
+      } else {
+        // ── Path 2: surface API + ZSL API fallback (same as MatrixOptimizer) ─
+        if (!SURFACE_API_URL) {
+          throw new Error('API endpoint not configured. Set VITE_INTERFACE_MATCH_API or VITE_SURFACE_API + VITE_ZSL_API.');
+        }
+        if (!ZSL_API_URL) {
+          throw new Error('API endpoint not configured. Set VITE_INTERFACE_MATCH_API or VITE_SURFACE_API + VITE_ZSL_API.');
+        }
+
+        // Step 1: build surface primitive cell
+        const surfaceResp = await fetch(SURFACE_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ element: metal, h: millerH, k: millerK, l: millerL, backend: 'ase' }),
+        });
+        const surfaceData = (await surfaceResp.json().catch(() => ({}))) as SurfaceApiResponse;
+        if (!surfaceResp.ok || !surfaceData.success || !surfaceData.targets?.length) {
+          throw new Error(surfaceData.error || `Surface API error ${surfaceResp.status}`);
+        }
+
+        let baseA = Number(surfaceData.targets[0].a);
+        let baseB = Number(surfaceData.targets[0].b);
+        const baseGamma = Number(surfaceData.targets[0].gamma);
+
+        // Scale if user has a validated lattice constant
+        const bulkLatticeA = Number(surfaceData.bulk_info?.lattice_a);
+        const effectiveLatticeA = selectedMetal?.a0;
+        if (effectiveLatticeA && effectiveLatticeA > 0 && Number.isFinite(bulkLatticeA) && bulkLatticeA > 0) {
+          const scale = effectiveLatticeA / bulkLatticeA;
+          baseA *= scale;
+          baseB *= scale;
+        }
+
+        // Step 2: adaptive repeat ZSL matching
+        const strictMismatch  = maxMismatch / 100;
+        const relaxedMismatch = Math.max(strictMismatch, Math.min(0.2, strictMismatch * 2));
+
+        const fetchZsl = async (repeat: number, mismatchFraction: number, requestTopK: number) => {
+          const zslResp = await fetch(ZSL_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              substrate_a: baseA * repeat,
+              substrate_b: baseB * repeat,
+              substrate_gamma: baseGamma,
+              film_a: ml.a,
+              film_b: ml.b,
+              film_gamma: ml.gamma,
+              max_area: maxArea,
+              max_mismatch: mismatchFraction,
+              min_inplane_angle: minAngle,
+              max_aspect_ratio: maxAspect,
+              top_k: requestTopK,
+            }),
+          });
+          const zslData = (await zslResp.json().catch(() => ({}))) as ZslApiResponse;
+          if (!zslResp.ok || !zslData.success) {
+            throw new Error(zslData.error || `ZSL API error ${zslResp.status}`);
+          }
+          return { matches: zslData.matches ?? [], total: zslData.total_candidates ?? 0 };
+        };
+
+        const fallbackCandidates: ZSLResult[] = [];
+        let totalCandidatesCount = 0;
+        let strictMatches: ZSLResult[] | null = null;
+
+        for (let repeat = 1; repeat <= repeatMax; repeat++) {
+          const strict = await fetchZsl(repeat, strictMismatch, topK);
+          totalCandidatesCount += strict.total;
+
+          if (strict.matches.length > 0) {
+            strictMatches = strict.matches.map((m) => ({ ...m, pt_repeat: repeat }));
+            break;
+          }
+
+          if (relaxedMismatch > strictMismatch) {
+            const relaxed = await fetchZsl(repeat, relaxedMismatch, Math.max(topK, 12));
+            fallbackCandidates.push(...relaxed.matches.map((m) => ({ ...m, pt_repeat: repeat })));
+          }
+        }
+
+        if (strictMatches && strictMatches.length > 0) {
+          setResults(strictMatches);
+          setTotalCandidates(totalCandidatesCount);
+          setMatchStatus('ok');
+        } else if (fallbackCandidates.length > 0) {
+          const ranked = [...fallbackCandidates]
+            .sort((a, b) => a.mismatch_pct - b.mismatch_pct || a.interface_area_ang2 - b.interface_area_ang2)
+            .slice(0, topK)
+            .map((m, i) => ({ ...m, rank: i + 1 }));
+          setResults(ranked);
+          setTotalCandidates(totalCandidatesCount || fallbackCandidates.length);
+          setMatchStatus('no_match_under_threshold');
+        } else {
+          throw new Error('No interface candidates found under current geometry/area constraints.');
+        }
       }
-
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
-      setMatchStatus(data.status ?? (data.matches?.length ? 'ok' : 'no_match_under_threshold'));
-      setTotalCandidates(data.summary?.num_candidates ?? null);
-      setResults(data.matches ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unexpected error occurred.');
     } finally {
