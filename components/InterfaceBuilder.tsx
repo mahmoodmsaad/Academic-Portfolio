@@ -239,6 +239,7 @@ const InterfaceBuilder: React.FC = () => {
             body: JSON.stringify({
               substrate_a: baseA * repeat, substrate_b: baseB * repeat, substrate_gamma: baseGamma,
               film_a: ml!.a, film_b: ml!.b, film_gamma: ml!.gamma,
+              film_atoms_per_cell: ml!.atoms_per_cell,
               max_area: maxArea, max_mismatch: mismatchFraction,
               min_inplane_angle: minAngle, max_aspect_ratio: maxAspect, top_k: requestTopK,
             }),
@@ -325,7 +326,7 @@ const InterfaceBuilder: React.FC = () => {
             using ZSL lattice matching with adaptive substrate repeat and von Mises strain analysis.
           </p>
           <div className="flex flex-wrap justify-center gap-2 mt-4">
-            {['ASE builders', 'ZSL-HNF matching', 'Adaptive repeat', 'Strain analysis'].map((tag) => (
+            {['ASE builders', 'ZSL-pymatgen', 'Adaptive repeat', 'Strain analysis'].map((tag) => (
               <span key={tag} className="bg-white border border-slate-200 text-slate-600 text-xs px-3 py-1 rounded-full font-medium shadow-sm">
                 {tag}
               </span>
