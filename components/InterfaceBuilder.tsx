@@ -26,8 +26,88 @@ const ZSL_API_URL = import.meta.env.VITE_ZSL_API?.trim()
 interface SurfaceApiResponse {
   success: boolean;
   error?: string;
-  targets?: Array<{ a: number; b: number; gamma: number }>;
+  targets?: Array<{ a: number; b: number; gamma: number; cif?: string }>;
   bulk_info?: { lattice_a: number };
+}
+
+// ── CIF generators ────────────────────────────────────────────────────────────
+interface BaseAtom { symbol: string; x: number; y: number; z: number }
+
+/** Generate a CIF for the film supercell from ZSL film_matrix + monolayer params */
+function generateFilmCIF(
+  filmMatrix: [[number, number], [number, number]],
+  a: number, b: number, gammaMonolayer: number,
+  basis: BaseAtom[],
+  monolayerName: string,
+): string {
+  const [m00, m01] = filmMatrix[0];
+  const [m10, m11] = filmMatrix[1];
+  const det = m00 * m11 - m01 * m10;
+
+  const gRad = (gammaMonolayer * Math.PI) / 180;
+  // Primitive cell Cartesian vectors
+  const a1 = [a, 0];
+  const a2 = [b * Math.cos(gRad), b * Math.sin(gRad)];
+  // Supercell Cartesian vectors
+  const S1 = [m00 * a1[0] + m01 * a2[0], m00 * a1[1] + m01 * a2[1]];
+  const S2 = [m10 * a1[0] + m11 * a2[0], m10 * a1[1] + m11 * a2[1]];
+  const lenS1 = Math.hypot(S1[0], S1[1]);
+  const lenS2 = Math.hypot(S2[0], S2[1]);
+  const cosG = (S1[0] * S2[0] + S1[1] * S2[1]) / (lenS1 * lenS2);
+  const gammaDeg = (Math.acos(Math.max(-1, Math.min(1, cosG))) * 180) / Math.PI;
+  const c = 20.0; // vacuum along z
+
+  // Inverse matrix for fractional coord conversion
+  const invDet = 1 / det;
+  const inv = [[m11 * invDet, -m01 * invDet], [-m10 * invDet, m00 * invDet]];
+
+  const atoms: (BaseAtom & { label: string })[] = [];
+  const range = Math.ceil(Math.abs(m00) + Math.abs(m01) + Math.abs(m10) + Math.abs(m11)) + 1;
+  const counts: Record<string, number> = {};
+
+  for (let i = -range; i <= range; i++) {
+    for (let j = -range; j <= range; j++) {
+      const fi = inv[0][0] * i + inv[0][1] * j;
+      const fj = inv[1][0] * i + inv[1][1] * j;
+      if (fi >= -1e-8 && fi < 1 - 1e-8 && fj >= -1e-8 && fj < 1 - 1e-8) {
+        for (const atom of basis) {
+          const sf = inv[0][0] * (atom.x + i) + inv[0][1] * (atom.y + j);
+          const sg = inv[1][0] * (atom.x + i) + inv[1][1] * (atom.y + j);
+          const sfW = ((sf % 1) + 1) % 1;
+          const sgW = ((sg % 1) + 1) % 1;
+          counts[atom.symbol] = (counts[atom.symbol] ?? 0) + 1;
+          atoms.push({ symbol: atom.symbol, label: `${atom.symbol}${counts[atom.symbol]}`, x: sfW, y: sgW, z: atom.z });
+        }
+      }
+    }
+  }
+
+  const formula = Object.entries(counts).map(([s, n]) => `${s}${n}`).join('');
+  let cif = `data_${monolayerName}_supercell\n`;
+  cif += `_chemical_formula_structural       ${formula}\n`;
+  cif += `_chemical_formula_sum              "${formula}"\n`;
+  cif += `_cell_length_a       ${lenS1.toFixed(6)}\n`;
+  cif += `_cell_length_b       ${lenS2.toFixed(6)}\n`;
+  cif += `_cell_length_c       ${c.toFixed(6)}\n`;
+  cif += `_cell_angle_alpha    90.0\n_cell_angle_beta     90.0\n`;
+  cif += `_cell_angle_gamma    ${gammaDeg.toFixed(6)}\n\n`;
+  cif += `_space_group_name_H-M_alt    "P 1"\n_space_group_IT_number       1\n\n`;
+  cif += `loop_\n  _space_group_symop_operation_xyz\n  'x, y, z'\n\n`;
+  cif += `loop_\n  _atom_site_type_symbol\n  _atom_site_label\n`;
+  cif += `  _atom_site_symmetry_multiplicity\n  _atom_site_fract_x\n`;
+  cif += `  _atom_site_fract_y\n  _atom_site_fract_z\n  _atom_site_occupancy\n`;
+  atoms.forEach((at) => {
+    cif += `  ${at.symbol}  ${at.label.padEnd(8)} 1.0  ${at.x.toFixed(10)}  ${at.y.toFixed(10)}  ${at.z.toFixed(6)}  1.0000\n`;
+  });
+  return cif;
+}
+
+function triggerDownload(content: string, filename: string, mime = 'text/plain') {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 interface ZslApiResponse {
   success: boolean;
@@ -101,6 +181,7 @@ const InterfaceBuilder: React.FC = () => {
   const [results, setResults] = useState<ZSLResult[] | null>(null);
   const [totalCandidates, setTotalCandidates] = useState<number | null>(null);
   const [matchStatus, setMatchStatus] = useState<'ok' | 'no_match_under_threshold' | null>(null);
+  const [substrateCif, setSubstrateCif] = useState<string | null>(null);
 
   const selectedMetal = METALS.find((m) => m.symbol === metal);
   const selectedMonolayer = MONOLAYER_PRESETS.find((m) => m.name === monolayer);
@@ -110,6 +191,7 @@ const InterfaceBuilder: React.FC = () => {
     setError('');
     setMatchStatus(null);
     setTotalCandidates(null);
+    setSubstrateCif(null);
   };
 
   const run = async () => {
@@ -141,6 +223,8 @@ const InterfaceBuilder: React.FC = () => {
         if (!surfaceResp.ok || !surfaceData.success || !surfaceData.targets?.length) {
           throw new Error(surfaceData.error || `Surface API error ${surfaceResp.status}`);
         }
+        // Store substrate CIF (1×1 primitive slab) for per-match download
+        if (surfaceData.targets[0]?.cif) setSubstrateCif(surfaceData.targets[0].cif);
         let baseA = Number(surfaceData.targets[0].a);
         let baseB = Number(surfaceData.targets[0].b);
         const baseGamma = Number(surfaceData.targets[0].gamma);
@@ -540,15 +624,41 @@ const InterfaceBuilder: React.FC = () => {
                         ))}
                       </div>
 
-                      {/* Film matrix */}
-                      {match.film_matrix && (
-                        <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                          <span className="font-medium text-slate-600">Film supercell matrix:</span>
-                          <code className="bg-slate-100 px-2 py-0.5 rounded font-mono text-xs">
-                            [[{match.film_matrix[0][0]}, {match.film_matrix[0][1]}], [{match.film_matrix[1][0]}, {match.film_matrix[1][1]}]]
-                          </code>
+                      {/* Film matrix + CIF download */}
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        {match.film_matrix && (
+                          <div className="flex items-center gap-2 text-xs text-slate-500 flex-1">
+                            <span className="font-medium text-slate-600">Film matrix:</span>
+                            <code className="bg-slate-100 px-2 py-0.5 rounded font-mono text-xs">
+                              [[{match.film_matrix[0][0]}, {match.film_matrix[0][1]}], [{match.film_matrix[1][0]}, {match.film_matrix[1][1]}]]
+                            </code>
+                          </div>
+                        )}
+                        <div className="flex gap-2 ml-auto flex-wrap">
+                          {match.film_matrix && selectedMonolayer && (
+                            <button
+                              onClick={() => {
+                                const basis: BaseAtom[] = selectedMonolayer.baseAtoms?.length
+                                  ? selectedMonolayer.baseAtoms.map((a) => ({ ...a, z: 0.5 }))
+                                  : [{ symbol: 'B', x: 0, y: 0, z: 0.5 }, { symbol: 'N', x: 1/3, y: 2/3, z: 0.5 }];
+                                const cif = generateFilmCIF(match.film_matrix!, selectedMonolayer.a, selectedMonolayer.b, selectedMonolayer.gamma, basis, monolayer);
+                                triggerDownload(cif, `film_${monolayer}_rank${match.rank ?? i+1}_${metal}${millerH}${millerK}${millerL}.cif`);
+                              }}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-academic-700 hover:bg-academic-800 text-white text-xs font-semibold transition"
+                            >
+                              <Download size={12} /> Film CIF
+                            </button>
+                          )}
+                          {substrateCif && (
+                            <button
+                              onClick={() => triggerDownload(substrateCif, `substrate_${metal}${millerH}${millerK}${millerL}.cif`)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-academic-400 text-academic-700 hover:bg-academic-100 text-xs font-semibold transition"
+                            >
+                              <Download size={12} /> Substrate CIF
+                            </button>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
