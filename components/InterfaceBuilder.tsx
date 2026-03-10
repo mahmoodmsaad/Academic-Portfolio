@@ -598,15 +598,57 @@ const InterfaceBuilder: React.FC = () => {
               </div>
             )}
 
-            {/* Download note */}
+            {/* Download buttons */}
             {results.length > 0 && (
-              <div className="mt-4 flex items-start gap-2 bg-academic-50 border border-academic-200 rounded-xl px-4 py-3 text-sm text-academic-700">
-                <Download size={16} className="mt-0.5 flex-shrink-0" />
-                <span>
-                  To download CIF / POSCAR structure files, run the full workflow locally via the{' '}
-                  <code className="bg-academic-100 px-1.5 py-0.5 rounded text-xs font-mono">Streamlit app</code>
-                  {' '}or the Python CLI in the pt881-hbn-interface repository.
-                </span>
+              <div className="mt-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-academic-50 border border-academic-200 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2 text-sm text-academic-700 flex-1">
+                  <Download size={16} className="flex-shrink-0" />
+                  <span>Download results:</span>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => {
+                      const headers = ['Rank','Mismatch (%)','Rotation (deg)','Von Mises (%)','Area (A2)','Film Atoms','Substrate Atoms','Quality','Film Matrix'];
+                      const rows = results.map((m, i) => [
+                        m.rank ?? i + 1,
+                        (m.mismatch_pct ?? 0).toFixed(4),
+                        (m.rotation_deg ?? 0).toFixed(2),
+                        (m.von_mises_strain_pct ?? 0).toFixed(3),
+                        (m.interface_area_ang2 ?? 0).toFixed(1),
+                        m.film_supercell_atoms ?? '',
+                        m.substrate_supercell_atoms ?? '',
+                        mismatchTier(m.mismatch_pct).label,
+                        m.film_matrix ? `"[[${m.film_matrix[0][0]},${m.film_matrix[0][1]}],[${m.film_matrix[1][0]},${m.film_matrix[1][1]}]]"` : '',
+                      ]);
+                      const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
+                      const a = document.createElement('a');
+                      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                      a.download = `interface_matches_${metal}${millerH}${millerK}${millerL}_${monolayer}.csv`;
+                      a.click();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-academic-700 hover:bg-academic-800 text-white text-xs font-semibold transition"
+                  >
+                    <Download size={13} /> CSV
+                  </button>
+                  <button
+                    onClick={() => {
+                      const payload = {
+                        substrate: `${metal}(${millerH}${millerK}${millerL})`,
+                        monolayer,
+                        max_mismatch_pct: maxMismatch,
+                        matches: results,
+                      };
+                      const a = document.createElement('a');
+                      a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+                      a.download = `interface_matches_${metal}${millerH}${millerK}${millerL}_${monolayer}.json`;
+                      a.click();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-academic-400 text-academic-700 hover:bg-academic-100 text-xs font-semibold transition"
+                  >
+                    <Download size={13} /> JSON
+                  </button>
+                </div>
+                <p className="text-xs text-academic-600 sm:hidden">CIF/POSCAR: run locally via Streamlit or Python CLI.</p>
               </div>
             )}
           </div>
