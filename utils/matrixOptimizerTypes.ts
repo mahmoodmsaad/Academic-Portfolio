@@ -125,4 +125,5 @@ export interface ZSLResult {
   substrate_supercell_atoms: number;
   film_matrix: [[number, number], [number, number]];
   tier: ErrorTier;
+  pt_repeat?: number;
 }

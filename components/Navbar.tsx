@@ -18,6 +18,7 @@ const Navbar: React.FC = () => {
     { name: 'Experience', href: '#experience' },
     { name: 'Research', href: '#research' },
     { name: 'Matrix Optimizer', href: '#tools' },
+    { name: 'Interface Builder', href: '#interface-builder' },
     { name: 'QE Parser', href: '#qe-parser' },
     { name: 'Gallery', href: '#gallery' },
     { name: 'Contact', href: '#contact' },

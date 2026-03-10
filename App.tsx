@@ -5,6 +5,7 @@ import About from './components/About';
 import Experience from './components/Experience';
 import Research from './components/Research';
 import MatrixOptimizer from './components/MatrixOptimizer';
+import InterfaceBuilder from './components/InterfaceBuilder';
 import QEParser from './components/QEParser';
 import Gallery from './components/Gallery';
 import Contact from './components/Contact';
@@ -20,6 +21,7 @@ function App() {
         <Experience />
         <Research />
         <MatrixOptimizer />
+        <InterfaceBuilder />
         <QEParser />
         <Gallery />
         <Contact />

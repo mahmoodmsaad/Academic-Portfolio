@@ -157,3 +157,14 @@ aws apigatewayv2 update-api --api-id YOUR_API_ID --cors-configuration AllowOrigi
 - `deploy.ps1` - Automated deployment script
 - `DEPLOYMENT.md` - Detailed manual deployment guide
 - `README.md` - This file
+
+## Direct Interface Workflow Deploy
+
+For the pt881-style direct workflow (build substrate + match hBN in one call), deploy:
+
+```powershell
+cd lambda
+.\deploy_interface_match.ps1
+```
+
+This deploys `interface_matcher.py` and writes `VITE_INTERFACE_MATCH_API` to `.env.local`.
