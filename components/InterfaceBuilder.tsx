@@ -225,15 +225,11 @@ const InterfaceBuilder: React.FC = () => {
         }
         // Store substrate CIF (1×1 primitive slab) for per-match download
         if (surfaceData.targets[0]?.cif) setSubstrateCif(surfaceData.targets[0].cif);
-        let baseA = Number(surfaceData.targets[0].a);
-        let baseB = Number(surfaceData.targets[0].b);
+        // Use surface cell dimensions directly from the ASE builder (physically correct).
+        // The API already uses ASE's accurate built-in lattice constants — no rescaling needed.
+        const baseA = Number(surfaceData.targets[0].a);
+        const baseB = Number(surfaceData.targets[0].b);
         const baseGamma = Number(surfaceData.targets[0].gamma);
-        const bulkLatticeA = Number(surfaceData.bulk_info?.lattice_a);
-        const effectiveLatticeA = selectedMetal?.a0;
-        if (effectiveLatticeA && effectiveLatticeA > 0 && Number.isFinite(bulkLatticeA) && bulkLatticeA > 0) {
-          const scale = effectiveLatticeA / bulkLatticeA;
-          baseA *= scale; baseB *= scale;
-        }
         const strictMismatch  = maxMismatch / 100;
         const relaxedMismatch = Math.max(strictMismatch, Math.min(0.2, strictMismatch * 2));
         const fetchZsl = async (repeat: number, mismatchFraction: number, requestTopK: number) => {
@@ -326,10 +322,10 @@ const InterfaceBuilder: React.FC = () => {
           </h2>
           <p className="text-slate-500 max-w-2xl mx-auto text-base leading-relaxed">
             Build metallic surface slabs and 2D monolayers, then find low-mismatch epitaxial matches
-            using the pymatgen ZSL algorithm with adaptive substrate repeat.
+            using ZSL lattice matching with adaptive substrate repeat and von Mises strain analysis.
           </p>
           <div className="flex flex-wrap justify-center gap-2 mt-4">
-            {['ASE builders', 'pymatgen ZSL', 'Adaptive repeat', 'Strain analysis'].map((tag) => (
+            {['ASE builders', 'ZSL-HNF matching', 'Adaptive repeat', 'Strain analysis'].map((tag) => (
               <span key={tag} className="bg-white border border-slate-200 text-slate-600 text-xs px-3 py-1 rounded-full font-medium shadow-sm">
                 {tag}
               </span>
