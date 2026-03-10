@@ -14,9 +14,10 @@ import {
 import { METALS, MONOLAYER_PRESETS } from '../utils/monolayerDatabase';
 import type { ZSLResult } from '../utils/matrixOptimizerTypes';
 
-// ── API endpoints (env var → hardcoded Lambda fallback) ──────────────────────
-const INTERFACE_MATCH_API_URL = import.meta.env.VITE_INTERFACE_MATCH_API?.trim()
-  || 'https://oy34w61rc6.execute-api.us-east-1.amazonaws.com/prod/interface-match';
+// ── API endpoints ─────────────────────────────────────────────────────────────
+// interface-match is only used when explicitly configured (it times out at 29s).
+// Default path: surface-targets → zsl-match (two fast calls, same as MatrixOptimizer).
+const INTERFACE_MATCH_API_URL = import.meta.env.VITE_INTERFACE_MATCH_API?.trim() || '';
 const SURFACE_API_URL = import.meta.env.VITE_SURFACE_API?.trim()
   || 'https://oy34w61rc6.execute-api.us-east-1.amazonaws.com/prod/surface-targets';
 const ZSL_API_URL = import.meta.env.VITE_ZSL_API?.trim()
